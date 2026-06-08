@@ -134,7 +134,7 @@ name        = "reference"
 # Command to start a server. Placeholders are substituted by the harness.
 #   {root} = absolute path to a materialized root directory
 #   {port} = TCP port the server MUST bind on the loopback host (§3.1) (only with port_mode = "assigned")
-start       = "python -m wash.server --root {root} --port {port}"
+start       = ["python", "-m", "wash.server", "--root", "{root}", "--port", "{port}"]
 # Optional explicit shutdown; default is SIGTERM to the process group.
 stop        = "SIGTERM"
 # Port acquisition strategy (see §3.1). Default "assigned".
@@ -144,10 +144,9 @@ stop        = "SIGTERM"
 #                 prints "WASH-PORT <n>" to stdout as its first line; {port} is not
 #                 substituted and the harness reads the actual port from that line.
 port_mode   = "assigned"
-# How the harness decides the server is up (see §3.1). The default probes "/" and
-# treats any well-formed HTTP status line as ready (status value is NOT matched,
-# because "/" is directory behavior and varies per materialized root, §3.1).
-ready       = { type = "http", path = "/" }
+# How the harness decides the server is up (see §3.1). The default is a TCP
+# connect probe so readiness itself never sends a GET into the served namespace.
+ready       = { type = "tcp" }
 ready_timeout_sec = 10
 # Working directory for the start command (default: repo root).
 cwd         = "impls/reference"
@@ -159,10 +158,13 @@ env         = {}
 capabilities = "impls/reference/wash.capabilities.json"
 ```
 
-The start command launches the implementation in its *default* configuration.
-The harness asserts spec defaults (cross-origin disabled, `mutates false`, GET
-only) against this default launch, so the adapter must not pre-toggle any of
-them through `env` or start arguments.
+The `start` command is an argv array, not a shell string. Placeholders are
+substituted into individual argv elements, with no shell interpolation, globbing,
+or quoting step; this keeps roots with spaces or shell metacharacters launchable.
+The command launches the implementation in its *default* configuration. The
+harness asserts spec defaults (cross-origin disabled, `mutates false`, GET only)
+against this default launch, so the adapter must not pre-toggle any of them
+through `env` or start arguments.
 
 ### 3.1 Lifecycle requirements the harness enforces
 
@@ -207,16 +209,18 @@ them through `env` or start arguments.
 - **Root isolation.** Each launch gets a *fresh copy* of the root directory in a
   temp dir (§6.4), because PUT/DELETE/POST tests mutate the tree. The harness
   never runs mutation tests against the canonical corpus.
-- **Readiness.** The harness polls `ready` until success or timeout. "Success"
-  means the probe got back a well-formed HTTP status line on a fresh connection;
-  the status *value* is not matched, because the probe runs against whatever
-  materialized corpus root this launch received and `/` is directory behavior
-  (implementation-defined: 200 with a listing, 404 for an empty root, 403, etc.).
-  Matching a status allow-list here would spuriously fail readiness for a healthy
-  server, so the harness only requires that the server answers HTTP at all. An
-  implementation that never answers within `ready_timeout_sec` is reported as a
-  launch failure, not a spec failure (so a broken adapter is distinguishable from
-  a broken runtime).
+- **Readiness.** The harness polls `ready` until success or timeout. The default
+  `tcp` readiness succeeds when a fresh loopback TCP connection can be opened to
+  the declared host/port; the probe is closed immediately and sends no HTTP
+  request. This is intentionally weaker than a full HTTP request, but it avoids
+  mutating or warming the served root before a vector's own before/after
+  snapshot. Adapters may opt into `ready = { type = "http", path = "..." }` only
+  for an endpoint that is guaranteed by the implementation to be outside the
+  served root namespace and non-mutating. HTTP readiness success means the probe
+  got back a well-formed HTTP status line on a fresh connection; the status value
+  is not matched. An implementation that never becomes ready within
+  `ready_timeout_sec` is reported as a launch failure, not a spec failure (so a
+  broken adapter is distinguishable from a broken runtime).
 - **Liveness between vectors.** Within an isolation group the harness checks the
   child is still alive before each vector and treats a connection-refused /
   connection-reset result as evidence the process died. A server that exits or
@@ -266,7 +270,7 @@ shape, and the schema must be authored to match in phase 1 (§12).
   "origin_form": "http://127.0.0.1",
   "directory_listing": true,
   "default_index_files": ["index.html"],
-  "synthesized_resources": false,
+  "synthesized_resources": { "enabled": false, "fixtures": [] },
   "mime": {
     "inference": "by-extension",
     "map": { ".txt": "text/plain", ".json": "application/json" },
@@ -283,7 +287,7 @@ shape, and the schema must be authored to match in phase 1 (§12).
   "put_creates_parents": true,
   "runtime_artifact_paths": [],
   "interpreters": ["sh", "python3"],
-  "command_full_http_response": false
+  "command_full_http_response": { "enabled": false, "fixtures": [] }
 }
 ```
 
@@ -325,12 +329,38 @@ Field notes:
   true it asserts the parents and file are created, and when false it asserts an
   allowed policy rejection (e.g. 404/403/409) and no tree mutation.
 - `runtime_artifact_paths` lists root-relative paths (caches, logs, indexes) the
-  implementation may legitimately create or update while serving, which runtime
-  §9.7 permits. The post-request tree diff (§6.4) ignores these paths, so a GET
-  that writes a permitted internal cache is not misreported as a GET-safety
-  violation. Any mutation **outside** the declared paths still fails
-  `RT-9.1-get-no-mutate`. An empty list means the implementation promises to
-  write nothing to the served tree on a GET, which is the strictest contract.
+  implementation expects to create while serving. These paths are diagnostic
+  metadata only: they are recorded in reports to make unexpected tree changes
+  easier to interpret, but they are **not** exempted from `no_mutation` or
+  `mutation` diffs. A GET that changes any file in the materialized served-root
+  bundle still fails `RT-9.1-get-no-mutate`; implementations that cache generated
+  results should keep that cache outside the served tree or behind an internal
+  store not visible to the corpus diff.
+- `synthesized_resources.fixtures` is the complete set of optional synthesized
+  targets the harness can assert for this implementation. Each fixture gives a
+  raw target plus expected status, headers, and body matchers using the same
+  vocabulary as vector `expect` blocks. `enabled: true` with an empty fixture list
+  is informational only and runs no synthesized-resource vectors.
+- `command_full_http_response.fixtures` is the analogous declaration for
+  commands that emit full HTTP responses. Each fixture names the corpus command
+  target and exact status/header/body expectations. `enabled: true` with no
+  fixtures records support but runs no portable assertion.
+
+Both fixture lists use the same object shape, validated by
+`capabilities.schema.json`:
+
+```json
+{
+  "id": "docs-index",
+  "root": "synthesized",
+  "target": "/docs/index",
+  "expect": {
+    "status": 200,
+    "header": { "Content-Type": "text/plain" },
+    "body_exact": "wash-fixture: synthesized docs index\n"
+  }
+}
+```
 
 How tiers use it:
 
@@ -448,6 +478,7 @@ they run anywhere the adapter's declared interpreters exist.
 | `mutation/` | PUT/DELETE/POST against plain files; validates literal targeting (§9.2/§9.4) and POST-to-plain→405 (§9.3). The MUST-level PUT/DELETE vectors target paths whose parent already exists, so the literal mutation is unambiguous; PUT into a missing parent is a separate vector gated on `put_creates_parents` (§4). Command-governed POST *write* semantics (e.g. the `sort output.txt/input.txt` redirection of §9.3) are command-specific, not defined by the core spec, so they are **not** a core MUST: this root ships a fixture command with declared write behavior and the vector asserts only consistency with that shipped command's contract (it exercises the impl's body/argv plumbing and method gating, not a portable redirection rule). **Run only on disposable copies.** |
 | `exec-rules/` | `exec` interpreter rules: exact basename match, glob match against relative path, first-match-wins, comment/blank handling, malformed rule→500, unresolved interpreter→500 (§7.2, §15.5). Because the `exec` file's exact bytes *are* the assertion, this root is **pinned to `sh`** (`requires_interpreter: sh`) and exempt from the interpreter-substitution pass (§6.3); it is skipped for an implementation that does not declare `sh`. |
 | `encoding/` | Percent-encoding edge cases: `%5B%5D`, `%2F` in argv vs path, `%3F` literal `?` filename, `%26` literal-`&` command name, decoded NUL/`/` rejection in path segments. A decoded `/` or NUL is valid in an *argument* segment (§5.1, passed verbatim) but invalid in a *filesystem-lookup* segment (§9.1/§12.2); the spec marks the latter "invalid" without fixing a status, so those vectors assert `status_any: [400, 404]` rather than a single class. |
+| `symlinks/` | Symlink policy checks gated on `symlink_policy` and host support. The materializer synthesizes an in-root symlink and a harmless escaping symlink to a sibling bundle file. `reject-escaping` asserts the escaping target is not served (allowed rejection statuses only, and body must not contain the outside bytes); `follow` asserts the declared follow behavior against the synthesized fixtures; `unsupported` skips the symlink vectors. |
 | `synthesized/` | Optional synthesized-resource checks. Runs only when the capability manifest declares concrete synthesized fixture paths (for example `/docs/index`) and their expected status/body/header behavior; validates command-parse-beats-synth, exact-file-beats-synth precedence, and 400-is-terminal-no-fallback. |
 | `path-outside/` | `env/path` pointing to `../shared/bin`; validates command dirs outside root work (§7.1) while literal file serving still rejects root escape (§12.2). Materialization copies this root as part of a fixture bundle that preserves the sibling `shared/bin` relationship. |
 | `case/` | Files differing only by case; behavior gated on `case_sensitive_lookup` declaration (audit R7, optional). The case-colliding pair is **synthesized at run time** and the vectors skip on a case-insensitive host (§6.6) — it is not checked in. |
@@ -608,10 +639,10 @@ likewise skips (does not substitute) an `sh`-pinned root.
 - After such a vector, the harness diffs the temp tree against the pristine
   fixture to assert either *exactly* the intended mutation or no mutation at all
   (`RT-9.1-get-no-mutate`).
-- The diff ignores paths the manifest declares in `runtime_artifact_paths` (§4),
-  so an implementation that writes a permitted internal cache/log into the served
-  tree (runtime §9.7) is not misreported as mutating on GET. Any change outside
-  those declared paths still counts.
+- The diff never ignores changes inside the materialized served-root bundle for a
+  vector that asserts `no_mutation` or an exact `mutation`. Paths declared in
+  `runtime_artifact_paths` (§4) are shown in diagnostics when they change, but they
+  do not make a served-tree write conformant.
 - Roots with external relatives, such as `path-outside/` and its sibling
   `shared/bin`, are materialized as bundles so relative command-path entries keep
   the same shape they had in the canonical corpus. The bundle is laid out as
@@ -630,13 +661,12 @@ likewise skips (does not substitute) an `sh`-pinned root.
   byte-stable marker as the file's content (`wash-fixture: default-index\n`) so the
   serving vector can assert it with `body_exact` regardless of which filename the
   implementation declared.
-- Symlink fixtures (for the §9.1 default-reject test) are **not** checked in as
-  real symlinks; they are synthesized into the materialized tree at run time and
-  only when the platform supports symlink creation and the manifest declares a
-  `symlink_policy`. On platforms or implementations without symlink support the
-  symlink vectors are skipped with a recorded reason. This keeps `validate-roots`
-  (§6.5) free of checked-in symlinks while still exercising the behavior where it
-  is meaningful.
+- Symlink fixtures for `symlinks/` are **not** checked in as real symlinks; they
+  are synthesized into the materialized tree at run time and only when the
+  platform supports symlink creation and the manifest declares a `symlink_policy`.
+  On platforms or implementations without symlink support the symlink vectors are
+  skipped with a recorded reason. This keeps `validate-roots` (§6.5) free of
+  checked-in symlinks while still exercising the behavior where it is meaningful.
 
 ### 6.5 Generation vs checked-in
 
@@ -785,8 +815,12 @@ every matcher and condition introduced anywhere in this document — the `expect
 matchers above, `timeout_means` (§3.1), the capability/interpreter gates
 `requires_capability` / `forbidden_when` / `requires_interpreter` (§7.3), and the
 policy branches `when_writes_disabled` / `when_deletes_disabled` (§4) — is defined
-as a field in that schema so none is silently dropped. A field described in prose
-but missing from the schema is a corpus bug caught by `validate-roots`.
+as a field in that schema so none is silently dropped. `validate-vectors` loads
+every YAML vector, rejects unknown fields, validates matcher combinations, and
+checks that referenced clauses, roots, capabilities, and sibling `head_of` ids
+exist. Schema fields mentioned in prose but not represented in
+`vector.schema.json` are treated as phase-1 contract gaps before vectors are
+authored.
 
 A vector may also carry an optional top-level `timeout_means` (§3.1) with the
 value `fail` (default) or `timeout`. It controls how a per-request deadline is
@@ -926,19 +960,20 @@ harness itself.
     rather than treating it as a forgotten clause.
 - **Synthesized resources.** Because synthesis is implementation-defined, the
   manifest must declare concrete synthesized fixture targets before synthesized
-  vectors run. A bare `synthesized_resources: true` is informational only; it
-  does not give the harness enough information to assert portable behavior.
+  vectors run. `synthesized_resources.enabled: true` with an empty `fixtures` list
+  is informational only; it does not give the harness enough information to assert
+  portable behavior.
 - **Command-emitted full HTTP responses** (runtime §12.5, pipeline §5.8: a command
   setting its own status, headers, redirects, cookies, or overriding `mime`) are
   **implementation-defined and not portably testable**, because the spec never
   defines the mechanism by which a command signals "this is a full HTTP response"
   versus raw stdout bytes. The harness therefore does not assert this behavior by
-  default. The `command_full_http_response` capability flag records whether an
-  implementation supports it; when an implementation declares the flag *and*
-  provides — through its capability manifest — a concrete fixture command plus the
-  exact status/headers it emits, the harness runs a consistency check against that
-  declaration (mirroring how synthesized resources are gated above). A bare
-  `command_full_http_response: true` is informational only.
+  default. The `command_full_http_response.enabled` capability flag records
+  whether an implementation supports it; when an implementation declares the flag
+  *and* provides — through its capability manifest — concrete fixture commands plus
+  the exact status/headers they emit, the harness runs consistency checks against
+  those declarations (mirroring how synthesized resources are gated above).
+  `enabled: true` with an empty `fixtures` list is informational only.
 - **Per-implementation scorecard.** MUST pass rate (must be 100% to be
   "conformant"), SHOULD pass rate, declared optional features and their
   consistency results, and an explicit list of skipped tests with reasons.
@@ -994,6 +1029,7 @@ wash-conformance run --adapter A.toml --clause PP-5.4-exit-map
 
 # Validate the corpus / a manifest without running an impl:
 wash-conformance validate-roots
+wash-conformance validate-vectors
 wash-conformance validate-capabilities adapters/reference.toml
 
 # Coverage of the vectors against the clause registry:
@@ -1020,7 +1056,8 @@ Under the hood these are pytest invocations with parametrization, so
    and language-neutral throughout.
 1. **Skeleton + contracts.** `pyproject.toml`, the two JSON Schemas
    (capabilities, vector), `spec.py` clause registry seeded with MUST clauses,
-   and `report.py` result model. No server interaction yet.
+   `validate-capabilities`, `validate-vectors`, and `report.py` result model. No
+   server interaction yet.
 2. **Non-normalizing HTTP client** (§8) with a self-test against a loopback echo.
 3. **Adapter lifecycle** (§3): launch/ready/teardown, both port modes
    (`assigned` with bind-failure retry, and `ephemeral` port readout), root
@@ -1041,7 +1078,8 @@ Under the hood these are pytest invocations with parametrization, so
    capability manifest rather than left as silent failures.
 6. **Capability gating** (§4) and the optional/SHOULD tiers.
 7. **Coverage + reporters** (§9, §10), then the comparison matrix.
-8. **CI wiring** and a `--strict` gate.
+8. **CI wiring** for `validate-roots`, `validate-vectors`,
+   `validate-capabilities`, coverage, and a `--strict` gate.
 
 Phase 0 exists so every later phase has a live server to develop against. The
 reference participates only through its adapter and capability manifest, so
