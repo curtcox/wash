@@ -263,11 +263,23 @@ If present, interpreter rules may be stored at:
 
 text root/exec 
 
-The file is line-oriented with shell-like quoting.
-
-Approximate format:
+The file is line-oriented. Each rule has the form:
 
 text <pattern> <interpreter> [args...] 
+
+Rules are evaluated from top to bottom. The first matching rule wins.
+
+Grammar and matching rules:
+
+1. One rule per line.
+2. Blank lines are ignored.
+3. A line whose first non-whitespace character is # is a comment and is ignored. Inline # is not a comment.
+4. Tokens are separated by ASCII whitespace. Quoting and escaping are not defined in v1; values requiring whitespace are out of scope.
+5. A rule must contain at least a pattern and an interpreter.
+6. A pattern with no glob metacharacters matches the command basename exactly.
+7. A pattern containing glob metacharacters (*, ?, or []) matches both the command basename and the command path relative to the matched command directory.
+8. If no rule matches and the command cannot otherwise be executed, interpreter resolution fails (§15.5).
+9. A malformed rule makes interpreter-rule evaluation invalid; a request that needs interpreter-rule evaluation returns 500 Internal Server Error.
 
 Example:
 
@@ -607,6 +619,8 @@ sh curl http://localhost:PORT/grep/needle/file.txt
 
 should return the command output directly.
 
+The v1 request-target model assumes a direct local connection to the runtime. Proxies, gateways, CDNs, or other intermediaries may normalize, reject, or rewrite unusual request-targets such as per-command multi-? URLs and are outside the v1 compatibility contract. URL fragments (#...) are never transmitted to the server and cannot participate in pipeline syntax.
+
 ### 11.5 History and UI
 
 The runtime may keep its own history, logs, saved pipelines, or local browser-visible state, but none are required.
@@ -640,6 +654,8 @@ For each request, the runtime:
 Command execution is child-process-per-request.
 
 Commands normally see only their local arguments and local input. They do not automatically see the entire original URL or full parsed pipeline.
+
+The default working directory for command execution is the configured root. Therefore, literal argv strings that a command interprets as relative paths are normally interpreted relative to the project root, as if the command were run from that directory. Implementations may expose a policy or future metadata extension to override the working directory.
 
 A command may opt out of normal parsing and consume the remaining URL expression itself.
 
@@ -724,6 +740,8 @@ The system should be friendly to Git by favoring plain text, line-oriented metad
 3. Portability across machines is frequent but not guaranteed.
 4. Command directories may depend on machine-local interpreters, OS paths, environment variables, installed binaries, and permissions.
 
+Package-like distribution of command directories is outside the core specification. If standardized later, it should be defined by a separate package/trust specification rather than by the URL parsing contract.
+
 ### 14.1 Aliases and Reuse
 
 Reusable aliases are normally commands on the command path.
@@ -736,7 +754,7 @@ enables:
 
 text /errors/logs/app.log 
 
-There is no separate required mechanism for non-command reusable URL snippets. Reusable partial expressions may be modeled as commands.
+There is no separate required mechanism for non-command reusable URL snippets in v1. Reusable partial expressions may be modeled as commands. Future non-command URL-fragment support, if added, must specify whether fragments are plain files, pre-parse expansions, or explicit command inputs.
 
 ### 14.2 Saved URL Expressions
 
@@ -874,6 +892,8 @@ text /grep/needle/jq/haystack.json
 
 A runtime is not required to provide explain.
 
+If a future specification standardizes an explain/debug command, it must define the conventional command name and output contract, including whether the command emits plain text, JSON, or both. Until then, explain-style commands are ordinary optional commands.
+
 ### 16.9 Define an Alias
 
 Create a command:
@@ -886,25 +906,20 @@ text /errors/logs/app.log
 
 The alias behavior is whatever errors implements.
 
-## 17. Open Questions
+## 17. Resolved Design Decisions
 
-Many questions originally listed here are now resolved by pipeline_parsing.md. Remaining unresolved issues are tracked in remaining_issues.md.
-
-Still open:
-
-1. Exact line-oriented syntax for exec interpreter-rule quoting and matching (env/exec). The command-metadata grammar is resolved in pipeline_parsing.md §5.5; the exec rule format is separate and remains open.
-2. Whether there should be a conventional command for parse/explain/debug output.
-3. Whether a future spec should define reusable non-command URL fragments.
-4. Whether a future spec should define package-like distribution for command directories.
-5. Broader discovery/advertisement of synthesized responses beyond the optional diagnostic header (pipeline_parsing.md §9.5, §11).
-
-Resolved and removed from this list:
+Many questions originally listed here are now resolved by pipeline_parsing.md or by the sections above:
 
 - Default arity for metadata-free commands → arity 0 (pipeline_parsing.md §4).
 - Syntax and semantics of /& → prefix form (pipeline_parsing.md §8 and §8.8 above).
 - Command metadata grammar and normative field list → pipeline_parsing.md §5.5, §5.6.
 - Default behavior for POST to ordinary directories or files → 405 unless a command governs the path (§9.3).
 - Directory listing vs. index.html precedence → default file wins, fallback listing (§6.5).
+- Exec interpreter-rule grammar and matching → §7.2.
+- Conventional explain/debug command → optional in v1 (§16.8).
+- Non-command reusable URL fragments → outside v1 (§14.1).
+- Package-like command-directory distribution → outside the core specification (§14).
+- Synthesized-resource discovery and scope → pipeline_parsing.md §9.5.
 
 ## 18. Minimal Viable Implementation
 

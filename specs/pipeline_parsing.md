@@ -148,7 +148,7 @@ At minimum, the following form is supported:
 
 text arity * 
 
-arity * means the command consumes the rest of the URL as argv, leaving no input suffix and no downstream pipeline unless another explicit rule overrides this behavior.
+arity * means the command consumes the rest of the URL as argv, leaving no input suffix and no downstream pipeline.
 
 Example:
 
@@ -174,11 +174,11 @@ The metadata-free default input mode is:
 
 text input stdin 
 
-Additional input/output modes may be specified by metadata, for example:
+The only v1 normative input/output modes are:
 
-text input stdin input file input none output stdout output file 
+text input stdin output stdout 
 
-The exact complete set of input/output modes remains implementation-defined unless otherwise specified by the main specification.
+The names input file, input none, and output file are reserved for future specification. A v1 runtime that does not define an implementation extension for those modes treats them as malformed recognized metadata and returns 500 for requests resolving to that command (§5.5, §10.4).
 
 ### 5.4 Exit Status Mapping
 
@@ -473,7 +473,7 @@ If wc is metadata-free and /docs is a directory, this behaves as:
 
 sh cat docs | wc 
 
-Any resulting failure is determined by the actual behavior of the command pipeline and exit-status mapping.
+Implied-cat suffix evaluation uses filesystem file bytes only. Direct HTTP directory behavior, such as serving a configured default file or producing a directory listing, does not apply when the directory is used as a pipeline input suffix. A directory suffix is passed to the implied cat operation as a filesystem path and may fail naturally; any resulting failure is determined by the actual behavior of the command pipeline and exit-status mapping.
 
 ### 9.5 Synthesized Resources
 
@@ -487,7 +487,9 @@ Precedence:
 
 Therefore, if /docs/index is synthesized and /docs/index can also parse as a command pipeline, the command parse wins over the synthesized resource.
 
-A runtime may optionally emit a diagnostic header indicating that a synthesized resource was available but lost precedence to a command parse. This is optional and not required.
+Synthesized resources may resolve globally or after partial directory traversal, including beneath real directories whose exact requested child path does not exist. For example, if /docs is a real directory and /docs/index is not a real file, an implementation-defined synthesized /docs/index may resolve as long as no exact filesystem resource or command parse wins.
+
+A runtime may optionally emit a diagnostic header indicating that a synthesized resource was available but lost precedence to a command parse. Broader synthesized-resource discovery is limited in v1 to optional headers and implementation-defined resources; no conventional discovery command or resource is required.
 
 ## 10. Error Reporting Rules
 
