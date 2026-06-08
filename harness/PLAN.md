@@ -24,7 +24,8 @@ written yet.
    roots, and each test names the root it runs against.
 5. **Honest about ambiguity.** The specs deliberately leave many areas
    implementation-defined (MIME inference, directory listings, synthesized
-   resources, OPTIONS/CORS, symlink policy, case sensitivity). The harness
+   resources, OPTIONS/CORS, symlink policy, case sensitivity, command-emitted full
+   HTTP responses). The harness
    separates normative conformance from implementation-defined behavior and never
    fails an implementation for a choice the spec permits.
 
@@ -57,7 +58,16 @@ harness/
   adapters/                # example adapter manifests for reference impls
   capabilities.schema.json # JSON Schema for the capability manifest
   vector.schema.json       # JSON Schema for a declarative test vector
+
+impls/                     # reference implementations, each its own adapter target
+  reference/               # the phase-0 minimal server (§12); just another adapter
 ```
+
+`impls/` sits beside `harness/` (not inside it) so the harness has no code path
+into any implementation: the reference server is reached only through its adapter
+manifest and capability manifest, exactly like a third-party implementation. The
+`cwd` and `capabilities` paths in adapter manifests (§3) are relative to the
+repository root, so they reference `impls/...`.
 
 The harness is **Python + pytest**. pytest gives us parametrization
 (impl × root × vector), fixtures for server lifecycle, rich failure output, and
@@ -113,10 +123,17 @@ No code coupling; the harness only runs processes and speaks HTTP.
 name        = "reference-python"
 # Command to start a server. Placeholders are substituted by the harness.
 #   {root} = absolute path to a materialized root directory
-#   {port} = TCP port the server MUST bind on localhost
+#   {port} = TCP port the server MUST bind on localhost (only with port_mode = "assigned")
 start       = "python -m wash.server --root {root} --port {port}"
 # Optional explicit shutdown; default is SIGTERM to the process group.
 stop        = "SIGTERM"
+# Port acquisition strategy (see §3.1). Default "assigned".
+#   "assigned" — the harness picks a free port and substitutes {port}; the harness
+#                retries the whole launch on a bind-failure exit (race-safe).
+#   "ephemeral" — the implementation binds an OS-chosen free port (e.g. :0) and
+#                 prints "WASH-PORT <n>" to stdout as its first line; {port} is not
+#                 substituted and the harness reads the actual port from that line.
+port_mode   = "assigned"
 # How the harness decides the server is up (see §3.1).
 ready       = { type = "http", path = "/", expect_status_any = [200, 404] }
 ready_timeout_sec = 10
@@ -137,9 +154,20 @@ them through `env` or start arguments.
 
 ### 3.1 Lifecycle requirements the harness enforces
 
-- **Binding.** The implementation MUST bind the given `{port}` on a loopback
-  address. The harness picks a free port per launch (one launch per isolation
-  group, §2) to allow parallelism.
+- **Binding.** The implementation MUST bind a loopback address. Two strategies
+  (selected by `port_mode`, §3) avoid the pick-then-bind race that otherwise makes
+  `pytest -n` flaky:
+  - `assigned` (default): the harness reserves a free port, substitutes `{port}`,
+    and launches. Because another worker can claim that port between reservation
+    and the child's `bind()`, the harness treats a fast non-ready exit whose
+    output matches a configurable bind-failure pattern (default: contains
+    `EADDRINUSE`/`address already in use`) as a *retryable* launch, re-reserving a
+    new port up to a small fixed retry budget before declaring `LAUNCH_FAILURE`.
+  - `ephemeral`: the child binds an OS-chosen free port (bind `:0`) and prints
+    `WASH-PORT <n>` as its first stdout line. The harness reads the actual port
+    from that line and derives `base_url` from it. This eliminates the race
+    entirely and is the recommended mode for implementations that can report their
+    port. The reference implementation (§12) supports `ephemeral`.
 - **Root isolation.** Each launch gets a *fresh copy* of the root directory in a
   temp dir (§6.4), because PUT/DELETE/POST tests mutate the tree. The harness
   never runs mutation tests against the canonical corpus.
@@ -188,21 +216,29 @@ behavior plus whatever the implementation has declared.
   "max_error_body_bytes": 8192,
   "writes_enabled": true,
   "deletes_enabled": true,
-  "interpreters": ["sh", "python3"]
+  "interpreters": ["sh", "python3"],
+  "command_full_http_response": false
 }
 ```
 
 Field notes:
 
 - `spec_version` pins the manifest to a specific revision of the specs. The
-  harness records it as `<spec-version>@<spec-commit>` in every report so a
-  conformance claim is reproducible against the exact spec text it was made
-  against; a manifest whose `spec_version` predates the registry's spec revision
-  is flagged.
+  canonical version string is the single source of truth held in
+  `conformance/spec.py` as `SPEC_VERSION` (currently `"1"`); the spec **commit** is
+  resolved at run time from `git rev-parse HEAD` of the repository containing
+  `specs/` (falling back to `unknown` outside a checkout). The harness records the
+  pair as `<spec-version>@<spec-commit>` in every report so a conformance claim is
+  reproducible against the exact spec text it was made against. A manifest whose
+  `spec_version` does not equal `spec.py`'s `SPEC_VERSION` is flagged.
 - `origin_form` is the scheme+authority the implementation serves on (e.g.
-  `http://localhost`). The harness uses it only to construct the `Origin` header
-  for the cross-origin test (§13.1): a request is "cross-origin" when its
-  `Origin` differs from this value.
+  `http://localhost`). The harness uses it only for the cross-origin test (§13.1):
+  the request carries a fixed foreign `Origin` of `http://cross-origin.invalid`
+  (the `.invalid` TLD is reserved by RFC 2606 and can never collide with
+  `origin_form`), and "cross-origin" means precisely that this differs from
+  `origin_form`. If an implementation legitimately serves on
+  `http://cross-origin.invalid`, it may override the foreign origin the harness
+  sends via an optional `cross_origin_probe` manifest field.
 - `interpreters` lists the interpreters the implementation can resolve through
   `exec` rules. The harness uses it to **skip** any root whose command scripts
   require an interpreter the implementation does not declare (§7.3), recording
@@ -298,14 +334,14 @@ they run anywhere the adapter's declared interpreters exist.
 |------|------------------------------|
 | `empty/` | Empty root is valid (§4.2). Everything 404s; `/` is dir behavior. |
 | `plain-files/` | Literal file mapping (§6.1), MIME inference, raw bytes, nested paths, dot-segment normalization, root-escape rejection. Trailing-`?` disambiguation (§9.1/Q19): `/file.txt?download=1` strips the query and matches the file first, while a `?` followed by any raw `/` is per-command syntax and prevents the exact-file match. |
-| `directories/` | Directory behavior (§6.5): one dir holding a default file (named from the manifest's `default_index_files`, materialized per-impl), one without (listing or impl-defined, gated on `directory_listing`), trailing-slash equivalence and repeated-slash collapse (§9.1), directory used as an implied-cat suffix `/wc/docs` (§9.4). Because §6.5 is implementation-defined, these run as capability-gated consistency checks, not flat MUST/SHOULD. |
+| `directories/` | Directory behavior (§6.5): one dir holding a default file (named from the manifest's `default_index_files`, materialized per-impl), one without (listing or impl-defined, gated on `directory_listing`), trailing-slash equivalence and repeated-slash collapse (§9.1), directory used as an implied-cat suffix `/wc/docs` (§9.4). This root ships its own `env/path` + a `wc` command (from `_lib/`) so the `/wc/docs` implied-cat-over-directory vector has a command to run. Because §6.5 is implementation-defined, the directory-serving cases run as capability-gated consistency checks, not flat MUST/SHOULD. |
 | `precedence/` | The §6.2 ladder. Contains a real file `wc` at root, a real file `bin/wc`, a real `grep/docs/file.txt`, and commands `wc`/`grep` on PATH. Proves exact-path-wins, `/bin/wc` serves file, `/grep/docs/file.txt` serves file. |
 | `commands-mf/` | Metadata-free commands only (arity 0). `cat`-style pass-through, identity, line-count. Proves implied cat, multi-stage pipelines, and that path args → 400 (§13.1, §13.2 of pipeline). |
-| `commands-arity/` | Commands with `arity 1`, `arity 2` (diff-like), `arity *`. Proves path-arg consumption, multi-resource via root-relative argv (§10.5), arity-star argv. |
+| `commands-arity/` | Commands with `arity 1`, `arity 2` (diff-like), `arity *`. Proves path-arg consumption, multi-resource via root-relative argv (§10.5), arity-star argv, and that a **path-arity** argument is percent-decoded and passed verbatim even when it contains a decoded `/` — `/echo1/a%2Fb/file.txt` with `echo1` arity 1 passes the single argv `a/b` (§5.1, Q21), distinct from the query-value encoding cases in `commands-query/`. |
 | `commands-query/` | Query argv: `?arg=`, repeated `arg`, percent-encoded `/?&=` in values, query-disables-metadata-arity, core-arg-on-noncommand→400. |
 | `body-input/` | Request body as stdin (§10.6, §12.4): `POST /transform` with a body feeds the rightmost stage's stdin; input suffix wins over body when both present; `arity *` suppresses the URL input suffix but the body still feeds stdin (§5.2); no suffix and no body → stdin closed and empty. |
 | `commands-meta/` | Full metadata coverage: `methods`, `mutates`, `mime`, `stderr`, `exit` mappings, `parse-mode raw` (an `explain`-like command). |
-| `meta-malformed/` | Each subdir/command has one deliberately malformed metadata field (bad arity, bad exit pair, `mutates true`+GET, `input file`, range arity, raw-not-leftmost) → each must 500. |
+| `meta-malformed/` | Each subdir/command has one deliberately malformed metadata field → each must 500. Coverage spans bad arity, bad `exit` pair, bad `mime`, bad `stderr`, `mutates true`+GET, each reserved input/output mode (`input file`, `input none`, `output file`; R2), both reserved range-arity forms (`arity 1..3`, `arity 0..*`; R4), and `parse-mode raw` not in leftmost position. |
 | `pipelines/` | Realistic multi-stage pipelines (`jq`/`grep`/`wc` analogues with proper metadata) to validate the worked examples in pipeline §12 and runtime §8.4/§16.4. |
 | `stderr/` | Commands that write to stderr; validates `/&` boundary semantics (§8) and `stderr merge` metadata (§5.9), single-boundary scoping, rightmost-prefix rule. |
 | `exit-codes/` | Commands with deterministic exit codes + `exit` maps; validates default nonzero→400, custom maps, and pipefail aggregation (first-in-URL-order wins, §5.4). |
@@ -315,7 +351,7 @@ they run anywhere the adapter's declared interpreters exist.
 | `encoding/` | Percent-encoding edge cases: `%5B%5D`, `%2F` in argv vs path, `%3F` literal `?` filename, `%26` literal-`&` command name, NUL/`/` rejection in path segments. |
 | `synthesized/` | Optional synthesized-resource checks. Runs only when the capability manifest declares concrete synthesized fixture paths (for example `/docs/index`) and their expected status/body/header behavior; validates command-parse-beats-synth, exact-file-beats-synth precedence, and 400-is-terminal-no-fallback. |
 | `path-outside/` | `env/path` pointing to `../shared/bin`; validates command dirs outside root work (§7.1) while literal file serving still rejects root escape (§12.2). Materialization copies this root as part of a fixture bundle that preserves the sibling `shared/bin` relationship. |
-| `case/` | Files differing only by case; behavior gated on `case_sensitive_lookup` declaration (audit R7, optional). |
+| `case/` | Files differing only by case; behavior gated on `case_sensitive_lookup` declaration (audit R7, optional). The case-colliding pair is **synthesized at run time** and the vectors skip on a case-insensitive host (§6.6) — it is not checked in. |
 
 ### 6.2 Worked example: `precedence/`
 
@@ -387,8 +423,38 @@ their output bytes, following one **stage-tagging output contract**:
 `roots/_lib/` holds the canonical implementations of these scripts (one `.sh` and
 one `.py` variant of each), and each root's command files are copies of, or thin
 wrappers around, those canonical scripts so the output contract stays identical
-everywhere. The interpreter a script needs is declared in that root's `exec`
-file and gated against the manifest's `interpreters` (§4, §7.3).
+everywhere.
+
+#### Interpreter binding: one canonical form, substitution at materialization
+
+The checked-in corpus is **single-interpreter and concrete**, which keeps it
+Git-friendly and lets `validate-roots` (§6.5) check what is literally on disk. The
+canonical interpreter is POSIX `sh`:
+
+- Each root's command files are checked in as real `sh` scripts (copied from the
+  `.sh` variant in `_lib/`), and the root's checked-in `exec` file contains the
+  literal rule(s) that bind them to `sh`.
+- This `sh` form is the one `validate-roots` validates by default and the one a
+  reader sees in the repository.
+
+An implementation that declares `sh` in its `interpreters` manifest gets this tree
+copied verbatim at materialization. An implementation that does **not** declare
+`sh` but **does** declare another interpreter the corpus supports (e.g. `python3`)
+triggers an **interpreter-substitution pass** during materialization:
+
+1. For each served command, the harness replaces the `sh` script with the
+   corresponding `.py` variant from `_lib/` (same output contract, §6.3).
+2. The harness rewrites the materialized `exec` file so every rule that bound the
+   command to `sh` now binds it to the chosen interpreter.
+
+Substitution is purely mechanical because `_lib/` guarantees a byte-compatible
+variant per interpreter and the served command name carries no extension, so the
+`exec` rewrite only changes the interpreter token. A root is materializable for an
+implementation iff every command it serves has a `_lib/` variant for at least one
+interpreter the manifest declares; otherwise the whole root is skipped with a
+recorded reason (§7.3). `validate-roots --interpreter python3` validates the
+substituted form so the substitution pass itself is covered, not just the
+checked-in `sh` baseline.
 
 ### 6.4 Mutability and isolation
 
@@ -406,7 +472,10 @@ file and gated against the manifest's `interpreters` (§4, §7.3).
   `‹tmp›/root/` (the served root, with `env/path` containing `../shared/bin`) and
   `‹tmp›/shared/bin/`, so the `../shared/bin` entry resolves relative to the
   served root exactly as it does in the checked-in corpus. The adapter is
-  launched with `{root}` = `‹tmp›/root`.
+  launched with `{root}` = `‹tmp›/root`. For a bundle, `no_mutation`/`mutation`
+  diffing snapshots the **whole bundle** (`‹tmp›/`), not just the served root, so a
+  command that writes into the sibling `../shared/bin` is still detected rather
+  than silently missed.
 - Some fixtures are **parameterized per implementation** at materialization time.
   The `directories/` default-file fixture is created using the first entry of the
   manifest's `default_index_files` (so an implementation whose default file is not
@@ -422,11 +491,50 @@ file and gated against the manifest's `interpreters` (§4, §7.3).
 
 ### 6.5 Generation vs checked-in
 
-Roots are checked in as plain files (Git-friendly, matches the spec's ethos).
-A `rootcorpus.py validate` command verifies invariants before a run: required
-fixture files present, `env/path`/`exec`/`meta` parse, no accidental executable
-bits that would mask "no exec bit needed" tests (§4.4), and symlinks present only
-where a symlink test intends them.
+Roots are checked in as plain files (Git-friendly, matches the spec's ethos) in
+their canonical `sh` form (§6.3). A `rootcorpus.py validate` command verifies
+invariants before a run: required fixture files present, `env/path`/`exec`/`meta`
+parse, no accidental executable bits that would mask "no exec bit needed" tests
+(§4.4), and no checked-in fixtures of a kind the corpus is required to synthesize
+at run time (symlinks, §6.4; case-variant files, §6.6). `validate-roots
+--interpreter <name>` additionally materializes each root through the
+interpreter-substitution pass (§6.3) and validates the substituted tree, so a
+non-`sh` implementation's view of the corpus is checked too.
+
+Two kinds of fixture are deliberately **never checked in** and are instead
+synthesized into the materialized tree at run time, because they cannot be
+represented portably in a Git working tree:
+
+- **Symlink fixtures** (§6.4) — not all platforms create symlinks; checking them in
+  would also break clones on restrictive filesystems.
+- **Case-variant fixtures** (§6.6) — two names differing only by case cannot
+  coexist in a case-insensitive working tree (e.g. macOS/APFS, the common
+  development host), so they cannot be checked in at all.
+
+`validate-roots` therefore asserts these are *absent* from the checked-in corpus;
+the materializer adds them only where the platform and capability manifest make the
+corresponding test meaningful.
+
+### 6.6 Case-sensitivity fixtures (`case/`)
+
+The `case/` root tests behavior gated on the `case_sensitive_lookup` declaration
+(audit R7, optional). Its defining fixtures are two files whose names differ only
+by case (e.g. `Readme` and `readme`). Because the development host is
+case-insensitive, these **cannot** be checked in — the second file would collide
+with the first. They are handled exactly like symlink fixtures (§6.4):
+
+- The checked-in `case/` root contains only the case-insensitive scaffolding; the
+  case-colliding pair is **synthesized into the materialized tree at run time**.
+- Synthesis runs only when (a) the underlying temp filesystem is itself
+  case-sensitive — probed once at run start by creating `A`/`a` in a scratch dir —
+  and (b) the manifest declares `case_sensitive_lookup`.
+- When either precondition fails, the case-collision vectors are **skipped with a
+  recorded reason** (case-insensitive host filesystem, or capability not declared),
+  never failed. An implementation is thus never penalized for the host filesystem's
+  behavior, which the spec leaves implementation/host-defined (R7).
+
+This keeps the corpus committable on macOS while still exercising case sensitivity
+on hosts where it is observable.
 
 ---
 
@@ -533,14 +641,16 @@ skips (with a recorded reason) when the implementation declares it absent, and
 runs it as a consistency check when present. `forbidden_when` handles the inverse
 (e.g. CORS headers must be absent unless cross-origin is explicitly enabled).
 
-A vector (or its root) may carry `requires_interpreter: python3` (etc.). A root
-whose command scripts need an interpreter the manifest's `interpreters` list does
-not include is skipped wholesale, with the reason recorded, so an implementation
-is never failed for not running a language it never claimed to support. Because
-`roots/_lib/` ships both `.sh` and `.py` variants of every fixture command (§6.3),
-most roots can be materialized with whichever interpreter the implementation
-declares; a vector pins a specific interpreter only when the behavior under test
-is interpreter-specific.
+A vector (or its root) may carry `requires_interpreter: python3` (etc.). A root is
+skipped wholesale, with the reason recorded, when none of the interpreters the
+corpus can supply for its commands appears in the manifest's `interpreters` list,
+so an implementation is never failed for not running a language it never claimed to
+support. Because `roots/_lib/` ships both `.sh` and `.py` variants of every fixture
+command, the materializer's interpreter-substitution pass (§6.3) can bind a root to
+whichever interpreter the implementation declares; a vector pins a specific
+interpreter via `requires_interpreter` only when the behavior under test is
+interpreter-specific (in which case substitution to another interpreter is not
+attempted and the vector is skipped if that interpreter is absent).
 
 ---
 
@@ -580,8 +690,9 @@ This likely means a thin client over a low-level socket/`http.client` rather tha
     v1 *reserved* behavior (e.g. `input file` declared in metadata → 500; range
     arity → 500; OPTIONS is implementation-defined → only assert CORS-off
     default, not preflight specifics). The cross-origin-default assertion is
-    concrete: against a default launch (§3), a GET carrying an `Origin` that
-    differs from the manifest's `origin_form` must come back **without an
+    concrete: against a default launch (§3), a GET carrying the fixed foreign
+    `Origin: http://cross-origin.invalid` (which differs from the manifest's
+    `origin_form`, §4) must come back **without an
     `Access-Control-Allow-Origin` header** (`header_absent`). The harness asserts
     only this header absence — it does not require the request to be rejected,
     since "disabled" means the browser blocks the response, not that the server
@@ -593,6 +704,17 @@ This likely means a thin client over a low-level socket/`http.client` rather tha
   manifest must declare concrete synthesized fixture targets before synthesized
   vectors run. A bare `synthesized_resources: true` is informational only; it
   does not give the harness enough information to assert portable behavior.
+- **Command-emitted full HTTP responses** (runtime §12.5, pipeline §5.8: a command
+  setting its own status, headers, redirects, cookies, or overriding `mime`) are
+  **implementation-defined and not portably testable**, because the spec never
+  defines the mechanism by which a command signals "this is a full HTTP response"
+  versus raw stdout bytes. The harness therefore does not assert this behavior by
+  default. The `command_full_http_response` capability flag records whether an
+  implementation supports it; when an implementation declares the flag *and*
+  provides — through its capability manifest — a concrete fixture command plus the
+  exact status/headers it emits, the harness runs a consistency check against that
+  declaration (mirroring how synthesized resources are gated above). A bare
+  `command_full_http_response: true` is informational only.
 - **Per-implementation scorecard.** MUST pass rate (must be 100% to be
   "conformant"), SHOULD pass rate, declared optional features and their
   consistency results, and an explicit list of skipped tests with reasons.
@@ -664,8 +786,10 @@ Under the hood these are pytest invocations with parametrization, so
    (capabilities, vector), `spec.py` clause registry seeded with MUST clauses,
    and `report.py` result model. No server interaction yet.
 2. **Non-normalizing HTTP client** (§8) with a self-test against a loopback echo.
-3. **Adapter lifecycle** (§3): launch/ready/teardown, free-port allocation, root
-   materialization + post-run diff.
+3. **Adapter lifecycle** (§3): launch/ready/teardown, both port modes
+   (`assigned` with bind-failure retry, and `ephemeral` port readout), root
+   materialization (including interpreter substitution, §6.3, and runtime
+   synthesis of symlink/case fixtures, §6.4/§6.6) + post-run diff.
 4. **First vertical slice:** the `precedence/` and `commands-mf/` roots plus their
    vectors, run against a reference implementation, green end to end.
 5. **Fill the corpus** root by root (§6 table), writing vectors alongside each.
@@ -688,5 +812,8 @@ nothing in phases 1–8 may depend on its internals.
 - **Windows.** `sh`/`python3` interpreter availability and process-group
   signaling differ. Decide whether v1 of the harness targets POSIX only and
   gates Windows behind a capability/skip.
-- **Parallelism.** Per-launch isolation (§2) makes parallel runs safe; confirm
-  per-launch port allocation and temp-root cleanup are robust under `pytest -n`.
+- **Parallelism.** Per-launch isolation (§2) makes parallel runs safe, and the
+  port-binding contract (§3.1) handles the pick-then-bind race via `assigned`-mode
+  retry or `ephemeral` port readout. Remaining to confirm under `pytest -n`:
+  temp-root cleanup under worker crashes, and the one-time case-sensitivity probe
+  (§6.6) running once per session rather than once per worker.
