@@ -1,0 +1,517 @@
+# wash Conformance Harness — Plan
+
+> A language-neutral evaluation harness for `wash` (Web Shell) implementations.
+> It launches any implementation against a corpus of root directories, drives it
+> over HTTP, and reports how faithfully it implements `specs/runtime.md` and
+> `specs/pipeline_parsing.md` — including where it falls short.
+
+Status: planning. Scope of this document: architecture, contracts, the
+root-directory corpus, the test taxonomy, and reporting. No harness code is
+written yet.
+
+---
+
+## 1. Goals
+
+1. **Language-neutral.** Test any implementation written in any language. The
+   only coupling point is HTTP plus a thin launch contract.
+2. **Spec-driven.** Every test traces to a numbered clause in `runtime.md` or
+   `pipeline_parsing.md`. The suite is the executable form of the spec.
+3. **Shortcoming detection.** Surface not just pass/fail but *where* and *why* an
+   implementation diverges, with the offending clause cited.
+4. **Many root directories.** The filesystem is the source of truth, so behavior
+   is a function of root layout. The harness ships a corpus of purpose-built
+   roots, and each test names the root it runs against.
+5. **Honest about ambiguity.** The specs deliberately leave many areas
+   implementation-defined (MIME inference, directory listings, synthesized
+   resources, OPTIONS/CORS, symlink policy, case sensitivity). The harness
+   separates normative conformance from implementation-defined behavior and never
+   fails an implementation for a choice the spec permits.
+
+### Non-goals
+
+- Not a benchmark for speed/throughput (a latency smoke check is optional, §10).
+- Not a security scanner (it does assert the spec's security *contract*, e.g. GET
+  must not mutate, CORS off by default).
+- Does not test future/reserved features (range arity, `input file`, cwd
+  override) except to confirm they are rejected as the spec requires.
+
+---
+
+## 2. High-level architecture
+
+```
+harness/
+  PLAN.md                  # this document
+  pyproject.toml           # Python package + pytest entry points
+  conformance/             # the harness itself (Python)
+    runner.py              # orchestrates: pick impl × root, launch, run, collect
+    adapter.py             # launch-command adapter contract + lifecycle
+    httpclient.py          # raw request-target client (does NOT normalize URLs)
+    rootcorpus.py          # materializes/validates root directories
+    capabilities.py        # parse + apply an implementation's capability manifest
+    spec.py                # clause registry (id -> spec section, tier)
+    report.py              # JSON + JUnit + human-readable reporters
+    vectors/               # declarative test vectors (YAML), grouped by topic
+  roots/                   # the root-directory corpus (see §6)
+  adapters/                # example adapter manifests for reference impls
+  capabilities.schema.json # JSON Schema for the capability manifest
+  vector.schema.json       # JSON Schema for a declarative test vector
+```
+
+The harness is **Python + pytest**. pytest gives us parametrization
+(impl × root × vector), fixtures for server lifecycle, rich failure output, and
+JUnit XML for free. The *test content*, however, lives in language-agnostic YAML
+vectors (§7) so the corpus is reusable by a future non-Python runner.
+
+Execution model per run:
+
+```
+for impl in implementations:
+    caps = load_capability_manifest(impl)
+    for root in roots_required_by_selected_vectors:
+        server = adapter.launch(impl, root=materialize(root), port=free_port())
+        wait_until_ready(server)
+        for vector in vectors_for(root):
+            if vector.tier == optional and not caps.supports(vector.feature):
+                record SKIP(reason="capability not declared")
+            else:
+                actual = httpclient.send(server.base_url, vector.request)
+                record compare(vector.expect, actual, caps)
+        adapter.shutdown(server)
+emit reports
+```
+
+---
+
+## 3. The launch-command adapter contract
+
+An implementation participates by providing an **adapter manifest** — a small
+declarative file the harness reads to learn how to start and stop the server.
+No code coupling; the harness only runs processes and speaks HTTP.
+
+`adapters/<name>.toml`:
+
+```toml
+name        = "reference-python"
+# Command to start a server. Placeholders are substituted by the harness.
+#   {root} = absolute path to a materialized root directory
+#   {port} = TCP port the server MUST bind on localhost
+start       = "python -m wash.server --root {root} --port {port}"
+# Optional explicit shutdown; default is SIGTERM to the process group.
+stop        = "SIGTERM"
+# How the harness decides the server is up (see §3.1).
+ready       = { type = "http", path = "/", expect_status_any = [200, 404] }
+ready_timeout_sec = 10
+# Working directory for the start command (default: repo root).
+cwd         = "impls/reference-python"
+# Environment overrides for the child process.
+env         = { WASH_CORS = "off" }
+# Path to this implementation's capability manifest (§4).
+capabilities = "impls/reference-python/wash.capabilities.json"
+```
+
+### 3.1 Lifecycle requirements the harness enforces
+
+- **Binding.** The implementation MUST bind the given `{port}` on a loopback
+  address. The harness picks a free port per (impl, root) to allow parallelism.
+- **Root isolation.** Each launch gets a *fresh copy* of the root directory in a
+  temp dir (§6.4), because PUT/DELETE/POST tests mutate the tree. The harness
+  never runs mutation tests against the canonical corpus.
+- **Readiness.** The harness polls `ready` until success or timeout. An
+  implementation that never becomes ready is reported as a launch failure, not a
+  spec failure (so a broken adapter is distinguishable from a broken runtime).
+- **One root per instance.** Per `runtime.md` §4.2/§12.1, a server maps exactly
+  one root. The harness relaunches for each root rather than reconfiguring.
+- **Teardown.** SIGTERM, then SIGKILL after a grace period. Port must be released
+  before the next launch on it.
+
+---
+
+## 4. Capability manifest (tiered conformance)
+
+The specs mark many behaviors implementation-defined. Rather than guess, each
+implementation declares what it does in a **capability manifest**, validated
+against `capabilities.schema.json`. The harness then enforces only normative
+behavior plus whatever the implementation has declared.
+
+`wash.capabilities.json`:
+
+```json
+{
+  "spec_version": "1",
+  "origin_form": "http://localhost",
+  "directory_listing": true,
+  "default_index_files": ["index.html"],
+  "synthesized_resources": false,
+  "mime": {
+    "inference": "by-extension",
+    "map": { ".txt": "text/plain", ".json": "application/json" },
+    "default": "application/octet-stream"
+  },
+  "options_cors": "implementation-defined",
+  "symlink_policy": "reject-escaping",
+  "case_sensitive_lookup": true,
+  "execution_metadata_headers": true,
+  "error_body_formats": ["text/plain", "application/json"],
+  "max_error_body_bytes": 8192,
+  "writes_enabled": true,
+  "deletes_enabled": true,
+  "interpreters": ["sh", "python3"]
+}
+```
+
+How tiers use it:
+
+- **MUST tests** run for every implementation; failing one is non-conformance.
+- **SHOULD tests** run for every implementation; failing produces a warning, not
+  a hard failure, and is highlighted in the report.
+- **Optional/implementation-defined tests** run only when the manifest declares
+  the relevant capability, and they assert *internal consistency with the
+  declaration* (e.g. "you said `directory_listing: true`, so a directory with no
+  index must produce a listing"; "you said `mime.map` maps `.json`, so
+  `/data.json` must return that type"). If a capability is declared absent, the
+  matching tests are skipped and recorded as such.
+
+This makes the harness fair (no penalty for permitted choices) while still
+catching the most common real bug: behavior that contradicts the
+implementation's own declared contract or the spec's MUSTs.
+
+---
+
+## 5. Spec clause registry
+
+`conformance/spec.py` holds a registry mapping a stable clause id to its source
+section and tier. Every vector references one or more clause ids. This gives:
+
+- traceability (each failure cites e.g. `PP-§4` "metadata-free arity 0"),
+- coverage reporting (which clauses have ≥1 vector; §9),
+- tier lookup (MUST/SHOULD/optional) without duplicating it in every vector.
+
+Examples of clause ids and tiers (illustrative, not exhaustive):
+
+| Clause id | Source | Tier | Requirement |
+|-----------|--------|------|-------------|
+| `RT-6.2-precedence` | runtime §6.2 | MUST | exact file > command > synthesized > 404 |
+| `RT-6.3-direct-cmd-file` | runtime §6.3 | MUST | `/bin/wc` serves the file |
+| `RT-9.1-get-no-mutate` | runtime §9.1 | MUST | GET must not mutate state |
+| `RT-9.2-put-literal` | runtime §9.2 | MUST | PUT targets literal path, no cmd parse |
+| `RT-9.5-head-from-get` | runtime §9.5 | MUST | GET implies HEAD, body omitted |
+| `RT-9.5-methods-405` | runtime §9.5 | MUST | method not in `methods` → 405 |
+| `RT-13.1-cors-default` | runtime §13.1 | MUST | cross-origin disabled by default |
+| `PP-2-parse-algo` | pipeline §2 | MUST | normative parse order |
+| `PP-4-arity0-default` | pipeline §4 | MUST | metadata-free command = arity 0 |
+| `PP-4-implied-cat` | pipeline §4 | MUST | rightmost suffix fed via implied cat |
+| `PP-5.1-arity-n` | pipeline §5.1 | MUST | arity N consumes N segments |
+| `PP-5.2-arity-star` | pipeline §5.2 | MUST | `arity *` consumes rest as argv |
+| `PP-5.4-exit-map` | pipeline §5.4 | MUST | exit→status mapping + pipefail |
+| `PP-5.5-malformed-500` | pipeline §5.5 | MUST | malformed metadata → 500 |
+| `PP-6.1-core-arg` | pipeline §6.1 | MUST | `?arg=` is the only core query param |
+| `PP-6.3-arg-noncmd-400` | pipeline §6.3 | MUST | core arg on non-command → 400 |
+| `PP-8-stderr-prefix` | pipeline §8 | MUST | `/&` prefix merges one boundary |
+| `PP-9.2-no-cmd-in-dir` | pipeline §9.2 | MUST | no command lookup after dir traversal |
+| `PP-9.1-trailing-q` | pipeline §9.1 | MUST | trailing `?` is resource query first |
+| `RT-6.5-dir-index` | runtime §6.5 | SHOULD | index file > listing |
+| `PP-11-headers` | pipeline §11 | optional | `X-WebShell-*` header names |
+| `PP-9.5-synth` | pipeline §9.5 | optional | synthesized-resource behavior |
+| `RT-R7-case` | audit R7 | optional | case-sensitivity (declared, not mandated) |
+
+---
+
+## 6. Root-directory corpus
+
+The heart of the harness. Each root is a self-contained, version-controlled
+fixture exercising specific spec behaviors. Roots are deliberately small and
+single-purpose so a failure points at one concept. A vector names exactly one
+root; many vectors share a root.
+
+Layout under `harness/roots/<root-name>/`. Where a root needs `env/path`,
+`env/meta/<cmd>`, `exec`, or command files, they are checked in as ordinary
+files. Command scripts are POSIX `sh`/`python3` (matched by an `exec` rule) so
+they run anywhere the adapter's declared interpreters exist.
+
+### 6.1 Corpus overview
+
+| Root | Purpose / clauses exercised |
+|------|------------------------------|
+| `empty/` | Empty root is valid (§4.2). Everything 404s; `/` is dir behavior. |
+| `plain-files/` | Literal file mapping (§6.1), MIME inference, raw bytes, nested paths, dot-segment normalization, root-escape rejection. |
+| `directories/` | Directory behavior (§6.5): one dir with `index.html`, one without (listing or impl-defined), trailing-slash equivalence (§9.1). |
+| `precedence/` | The §6.2 ladder. Contains a real file `wc` at root, a real file `bin/wc`, a real `grep/docs/file.txt`, and commands `wc`/`grep` on PATH. Proves exact-path-wins, `/bin/wc` serves file, `/grep/docs/file.txt` serves file. |
+| `commands-mf/` | Metadata-free commands only (arity 0). `cat`-style pass-through, identity, line-count. Proves implied cat, multi-stage pipelines, and that path args → 400 (§13.1, §13.2 of pipeline). |
+| `commands-arity/` | Commands with `arity 1`, `arity 2` (diff-like), `arity *`. Proves path-arg consumption, multi-resource via root-relative argv (§10.5), arity-star argv. |
+| `commands-query/` | Query argv: `?arg=`, repeated `arg`, percent-encoded `/?&=` in values, query-disables-metadata-arity, core-arg-on-noncommand→400. |
+| `commands-meta/` | Full metadata coverage: `methods`, `mutates`, `mime`, `stderr`, `exit` mappings, `parse-mode raw` (an `explain`-like command). |
+| `meta-malformed/` | Each subdir/command has one deliberately malformed metadata field (bad arity, bad exit pair, `mutates true`+GET, `input file`, range arity, raw-not-leftmost) → each must 500. |
+| `pipelines/` | Realistic multi-stage pipelines (`jq`/`grep`/`wc` analogues with proper metadata) to validate the worked examples in pipeline §12 and runtime §8.4/§16.4. |
+| `stderr/` | Commands that write to stderr; validates `/&` boundary semantics (§8) and `stderr merge` metadata (§5.9), single-boundary scoping, rightmost-prefix rule. |
+| `exit-codes/` | Commands with deterministic exit codes + `exit` maps; validates default nonzero→400, custom maps, and pipefail aggregation (first-in-URL-order wins, §5.4). |
+| `methods/` | Commands declaring `methods GET POST`, GET-only, mutating-with-POST; validates 405, HEAD-from-GET, every-stage-must-permit-method. |
+| `mutation/` | PUT/DELETE/POST against plain files; validates literal targeting (§9.2/§9.4), POST-to-plain→405 (§9.3), command-governed POST write semantics. **Run only on disposable copies.** |
+| `exec-rules/` | `exec` interpreter rules: exact basename match, glob match against relative path, first-match-wins, comment/blank handling, malformed rule→500, unresolved interpreter→500 (§7.2, §15.5). |
+| `encoding/` | Percent-encoding edge cases: `%5B%5D`, `%2F` in argv vs path, `%3F` literal `?` filename, `%26` literal-`&` command name, NUL/`/` rejection in path segments. |
+| `synthesized/` | A root whose adapter *may* synthesize `/docs/index`; validates command-parse-beats-synth and exact-file-beats-synth precedence, and 400-is-terminal-no-fallback (optional tier). |
+| `path-outside/` | `env/path` pointing to `../shared/bin`; validates command dirs outside root work (§7.1) while literal file serving still rejects root escape (§12.2). |
+| `case/` | Files differing only by case; behavior gated on `case_sensitive_lookup` declaration (audit R7, optional). |
+
+### 6.2 Worked example: `precedence/`
+
+```
+roots/precedence/
+  env/path            ->  "bin\n"
+  bin/wc              ->  command script (counts lines)
+  bin/grep            ->  command script (filters)
+  env/meta/grep       ->  "arity 1\n"
+  wc                  ->  plain file containing "i am a regular file named wc"
+  bin/wc              ->  (the command, above)
+  grep/docs/file.txt  ->  plain file "served as a file, not a pipeline"
+  haystack.json       ->  sample input
+```
+
+Vectors against this root assert, among others:
+- `GET /wc` → 200, body is the *file* "i am a regular file named wc" (§6.2 last
+  paragraph: single-segment exact path wins).
+- `GET /bin/wc` → 200, serves the command file's bytes (§6.3).
+- `GET /grep/docs/file.txt` → 200, serves the file even though `grep` is a
+  command (§6.2 / pipeline §3, §9.1).
+- `GET /wc/haystack.json` → executes `cat haystack.json | wc` (§6.2: no
+  `root/wc/haystack.json` exists, so command parse proceeds).
+
+### 6.3 Command scripts in fixtures
+
+Fixture commands are tiny and deterministic, written so output is byte-stable
+across platforms. Example `roots/commands-arity/bin/diff2` (arity 2) just echoes
+its two argv values and the cwd-relative file existence, so the harness can
+assert root-relative argv handling (§10.5/§12.3) without depending on system
+`diff` output formatting. Where a real tool's behavior is needed (e.g. `wc -l`),
+the fixture wraps it in a script with a frozen locale/output format.
+
+### 6.4 Mutability and isolation
+
+- Read-only roots (most of them) may be served from a shared read-only copy.
+- Mutating roots (`mutation/`, any POST-write vectors) are deep-copied to a fresh
+  temp dir per launch. After the run, the harness diffs the temp tree against the
+  pristine fixture to assert *exactly* the intended mutation occurred and GET
+  vectors caused none (`RT-9.1-get-no-mutate`).
+
+### 6.5 Generation vs checked-in
+
+Roots are checked in as plain files (Git-friendly, matches the spec's ethos).
+A `rootcorpus.py validate` command verifies invariants before a run: required
+fixture files present, `env/path`/`exec`/`meta` parse, no accidental executable
+bits that would mask "no exec bit needed" tests (§4.4), and symlinks present only
+where a symlink test intends them.
+
+---
+
+## 7. Declarative test vectors
+
+Vectors are YAML, validated against `vector.schema.json`. They describe a raw
+request and an expected outcome in terms the harness can check language-neutrally.
+Critically, the **request is expressed as a raw request-target**, because the
+spec requires parsing the unnormalized target (multi-`?` URLs, raw `/` vs `%2F`);
+the harness's HTTP client (§8) sends it verbatim.
+
+`vectors/precedence.yaml` (excerpt):
+
+```yaml
+- id: prec-single-segment-file-wins
+  clauses: [RT-6.2-precedence]
+  tier: MUST
+  root: precedence
+  request:
+    method: GET
+    target: "/wc"
+  expect:
+    status: 200
+    body_exact: "i am a regular file named wc"
+
+- id: prec-direct-command-file
+  clauses: [RT-6.3-direct-cmd-file]
+  tier: MUST
+  root: precedence
+  request: { method: GET, target: "/bin/wc" }
+  expect:
+    status: 200
+    body_contains: "#"      # the script's shebang/marker; byte-stable substring
+
+- id: prec-command-over-file-of-same-name
+  clauses: [RT-6.2-precedence, PP-4-implied-cat]
+  tier: MUST
+  root: precedence
+  request: { method: GET, target: "/wc/haystack.json" }
+  expect:
+    status: 200
+    body_matches: '^\s*\d+\s*$'   # a line count, not the file named wc
+
+- id: arg-on-noncommand-is-400
+  clauses: [PP-6.3-arg-noncmd-400]
+  tier: MUST
+  root: commands-query
+  request: { method: GET, target: "/grep/-i?arg=needle/file.txt" }
+  expect:
+    status: 400
+```
+
+### 7.1 Expectation vocabulary
+
+A vector's `expect` block supports a small, declarative matcher set:
+
+- `status`, or `status_any: [..]` where the spec permits a choice.
+- `body_exact`, `body_contains`, `body_matches` (regex), `body_base64` (binary).
+- `header`: exact match; `header_present` / `header_absent`; `header_matches`.
+- `content_type` (with `mime.*` capability awareness — only enforced when the
+  implementation declares MIME inference and a mapping for the extension).
+- `no_mutation`: assert the post-request root-tree diff is empty (GET safety).
+- `mutation`: assert a specific path was created/replaced/deleted with given
+  bytes (PUT/DELETE/command-write).
+- `pipeline_header`: when `execution_metadata_headers` is declared, assert
+  `X-WebShell-Pipeline` etc. reflect the expected effective pipeline.
+- `error_body`: when `Accept: application/json`, assert the error doc contains
+  diagnostic fields (failing command, unexpected segment) — SHOULD tier, since
+  exact text is non-normative (pipeline §10.1).
+
+### 7.2 Negative and ambiguity vectors
+
+The spec is explicit that certain URLs are invalid. These get first-class
+vectors asserting the precise status (400 vs 404 vs 500 vs 405), since the most
+common implementation bug is the *wrong* error class:
+
+- metadata-free path args → 400 (`/wc/-l/file.txt`).
+- core arg on non-command → 400.
+- malformed metadata → 500 (not 400).
+- POST to plain file → 405.
+- method not permitted → 405.
+- no resource, no command → 404.
+- command-parse-started-then-failed is terminal (no synthesized fallback) → 400.
+
+### 7.3 Capability-conditional vectors
+
+A vector may carry `requires_capability: directory_listing` (etc.). The harness
+skips (with a recorded reason) when the implementation declares it absent, and
+runs it as a consistency check when present. `forbidden_when` handles the inverse
+(e.g. CORS headers must be absent unless cross-origin is explicitly enabled).
+
+---
+
+## 8. HTTP client requirements
+
+A standout property of this spec is that **the runtime must parse the raw
+request-target itself** and not lean on a library's single path/query split
+(runtime §12.2, pipeline §6). The harness's client must therefore *send* raw
+targets faithfully, or it can't test the very behavior under scrutiny:
+
+- Send multi-`?` targets like `/grep?arg=needle/jq?arg=.items%5B%5D/haystack.json`
+  byte-for-byte, without re-encoding or collapsing.
+- Preserve `%2F`, `%3F`, `%26`, `%5B%5D` exactly as authored in the vector.
+- Do not auto-normalize dot segments (let the server do §12.2 normalization).
+- Allow crafting cross-origin requests (an `Origin` header) to test §13.1.
+- Capture status, headers, and raw body bytes; never transcode the body.
+
+This likely means a thin client over a low-level socket/`http.client` rather than
+`requests`/`httpx` default behavior. The client module documents and tests this
+"don't normalize" property against a loopback echo so we trust the harness itself.
+
+---
+
+## 9. Coverage and the audit boundary
+
+- **Clause coverage report.** Cross-reference the clause registry (§5) with
+  vectors; emit a table of clauses with zero vectors so the suite's own gaps are
+  visible. Target 100% MUST-clause coverage before declaring the harness v1.
+- **Audit R1–R7 handling.** The `specs/audit.md` open items are *not* failures:
+  - R1 (OPTIONS/CORS), R2 (`input file`/`output file`/`input none`), R3 (cwd
+    override), R4 (range arity), R6 (`explain` contract) → vectors that assert the
+    v1 *reserved* behavior (e.g. `input file` declared in metadata → 500; range
+    arity → 500; OPTIONS is implementation-defined → only assert CORS-off
+    default, not preflight specifics).
+  - R5 (quoting in metadata/exec) → vectors confirm whitespace-separated tokens
+    only; values needing quoting are out of scope (not tested as supported).
+  - R7 (case sensitivity) → optional tier, gated on the capability declaration.
+- **Per-implementation scorecard.** MUST pass rate (must be 100% to be
+  "conformant"), SHOULD pass rate, declared optional features and their
+  consistency results, and an explicit list of skipped tests with reasons.
+
+---
+
+## 10. Reporting
+
+Three reporters from one result model (`report.py`):
+
+1. **Human summary** (stdout): per impl, a tiered table (MUST/SHOULD/optional),
+   the first N failures with clause id, the exact request target, expected vs
+   actual status/body diff, and the cited spec section text.
+2. **JSON** (`results.json`): machine-readable full results for dashboards or
+   cross-run diffing; one record per (impl, root, vector) with timing.
+3. **JUnit XML**: for CI integration; testcase names encode `impl/clause/vector`
+   so CI surfaces regressions per clause.
+
+Optional: a **conformance matrix** (markdown) — implementations as columns,
+clauses as rows, ✓/✗/– (skip) cells — to compare implementations at a glance and
+track an implementation's progress over time.
+
+A non-zero exit code if any MUST fails (gate for CI); SHOULD/optional failures
+are warnings unless `--strict` is passed.
+
+---
+
+## 11. CLI surface
+
+```
+# Run everything against one implementation:
+wash-conformance run --adapter adapters/reference-python.toml
+
+# Compare several:
+wash-conformance run --adapter adapters/*.toml --report matrix
+
+# Subset by clause, tier, or root:
+wash-conformance run --adapter A.toml --tier MUST --root precedence
+wash-conformance run --adapter A.toml --clause PP-5.4-exit-map
+
+# Validate the corpus / a manifest without running an impl:
+wash-conformance validate-roots
+wash-conformance validate-capabilities adapters/reference-python.toml
+
+# Coverage of the vectors against the clause registry:
+wash-conformance coverage
+```
+
+Under the hood these are pytest invocations with parametrization, so
+`pytest`-native flags (`-k`, `-x`, `-n` for parallelism) also work.
+
+---
+
+## 12. Build order (suggested phases)
+
+1. **Skeleton + contracts.** `pyproject.toml`, the two JSON Schemas
+   (capabilities, vector), `spec.py` clause registry seeded with MUST clauses,
+   and `report.py` result model. No server interaction yet.
+2. **Non-normalizing HTTP client** (§8) with a self-test against a loopback echo.
+3. **Adapter lifecycle** (§3): launch/ready/teardown, free-port allocation, root
+   materialization + post-run diff.
+4. **First vertical slice:** the `precedence/` and `commands-mf/` roots plus their
+   vectors, run against a reference implementation, green end to end.
+5. **Fill the corpus** root by root (§6 table), writing vectors alongside each.
+6. **Capability gating** (§4) and the optional/SHOULD tiers.
+7. **Coverage + reporters** (§9, §10), then the comparison matrix.
+8. **CI wiring** and a `--strict` gate.
+
+A reference implementation is needed to develop against; the harness should be
+built so that "the reference is just another adapter" — it gets no special
+treatment, which keeps the harness honest and language-neutral.
+
+---
+
+## 13. Open questions to revisit during build
+
+- **Reference implementation.** Which adapter do we develop against first? (Out
+  of scope for this plan; the harness must not depend on its internals.)
+- **Byte-stability of command output across OSes.** Fixtures wrap real tools to
+  freeze output; confirm the wrapping strategy holds for `wc`/`jq`/`grep`
+  analogues or replace them entirely with custom deterministic scripts.
+- **Windows.** `sh`/`python3` interpreter availability and process-group
+  signaling differ. Decide whether v1 of the harness targets POSIX only and
+  gates Windows behind a capability/skip.
+- **Parallelism.** Per-(impl, root) isolation makes parallel runs safe; confirm
+  port allocation and temp-root cleanup are robust under `pytest -n`.
+```
