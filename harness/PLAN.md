@@ -69,6 +69,15 @@ manifest and capability manifest, exactly like a third-party implementation. The
 `cwd` and `capabilities` paths in adapter manifests (§3) are relative to the
 repository root, so they reference `impls/...`.
 
+Because both the harness and the reference implementation are written in Python,
+they are kept as **separate packages with disjoint import roots**: the harness's
+`conformance` package never imports the reference's `wash` package (the reference
+is launched only as a subprocess via its adapter). This is a packaging invariant,
+not just a convention — nothing under `conformance/` may `import wash`, so the
+"reference is just another adapter" property cannot be violated by accident. The
+reference may be installed into its own environment; the harness does not require
+it to be importable.
+
 The harness is **Python + pytest**. pytest gives us parametrization
 (impl × root × vector), fixtures for server lifecycle, rich failure output, and
 JUnit XML for free. The *test content*, however, lives in language-agnostic YAML
@@ -124,7 +133,7 @@ No code coupling; the harness only runs processes and speaks HTTP.
 name        = "reference"
 # Command to start a server. Placeholders are substituted by the harness.
 #   {root} = absolute path to a materialized root directory
-#   {port} = TCP port the server MUST bind on localhost (only with port_mode = "assigned")
+#   {port} = TCP port the server MUST bind on the loopback host (§3.1) (only with port_mode = "assigned")
 start       = "python -m wash.server --root {root} --port {port}"
 # Optional explicit shutdown; default is SIGTERM to the process group.
 stop        = "SIGTERM"
@@ -162,11 +171,17 @@ them through `env` or start arguments.
   hostname). The harness therefore does not guess: the host it connects to is the
   **authority of the manifest's `origin_form` (§4)** combined with the launch port,
   and the implementation MUST bind that host. For example `origin_form:
-  http://localhost` ⇒ the implementation binds `localhost` and the harness derives
-  `base_url = http://localhost:<port>`; `origin_form: http://127.0.0.1` ⇒ bind and
-  dial `127.0.0.1`. This makes the loopback-host choice explicit and contractual
-  rather than a source of spurious launch failures, and it is the same
-  `origin_form` already used for the cross-origin test (§4/§13.1).
+  http://127.0.0.1` ⇒ the implementation binds and the harness dials `127.0.0.1`.
+  This makes the loopback-host choice explicit and contractual rather than a source
+  of spurious launch failures, and it is the same `origin_form` already used for the
+  cross-origin test (§4/§13.1). To avoid the IPv4/IPv6 dual-stack ambiguity of the
+  name `localhost` (which resolves to both `127.0.0.1` and `::1`, so a server that
+  binds only one family while the harness dials the other yields intermittent
+  connection-refused), `origin_form` SHOULD use a literal loopback IP. An
+  implementation that nevertheless declares `origin_form: http://localhost` MUST
+  bind **every** address family `localhost` resolves to on the host; otherwise the
+  harness's dial may miss the bound family. The reference implementation (§12)
+  declares `http://127.0.0.1`.
 - **Binding.** The implementation MUST bind a loopback address (the
   `origin_form` host above). Two strategies (selected by `port_mode`, §3) avoid the
   pick-then-bind race that otherwise makes `pytest -n` flaky:
@@ -233,12 +248,22 @@ implementation declares what it does in a **capability manifest**, validated
 against `capabilities.schema.json`. The harness then enforces only normative
 behavior plus whatever the implementation has declared.
 
+The fields whose values are drawn from a fixed set are **closed enumerations** in
+`capabilities.schema.json`, so `validate-capabilities` rejects an unknown value
+rather than silently accepting it: `mime.inference` ∈ {`by-extension`, `none`};
+`options_cors` ∈ {`implementation-defined`, `disabled`}; `symlink_policy` ∈
+{`reject-escaping`, `follow`, `unsupported`}; `error_body_formats` entries are
+media-type strings drawn from {`text/plain`, `application/json`}. Free-form fields
+(`map`, `interpreters`, `runtime_artifact_paths`, `default_index_files`) stay open.
+The schema is the source of truth for these sets; this list is illustrative of the
+shape, and the schema must be authored to match in phase 1 (§12).
+
 `wash.capabilities.json`:
 
 ```json
 {
   "spec_version": "1",
-  "origin_form": "http://localhost",
+  "origin_form": "http://127.0.0.1",
   "directory_listing": true,
   "default_index_files": ["index.html"],
   "synthesized_resources": false,
@@ -277,7 +302,8 @@ Field notes:
   claim is visibly non-reproducible). A manifest whose
   `spec_version` does not equal `spec.py`'s `SPEC_VERSION` is flagged.
 - `origin_form` is the scheme+authority the implementation serves on (e.g.
-  `http://localhost`). It serves two purposes. First, its host is the host the
+  `http://127.0.0.1`; see §3.1 on why a literal loopback IP is preferred over the
+  dual-stack name `localhost`). It serves two purposes. First, its host is the host the
   harness binds and connects to, combined with the per-launch port, to form
   `base_url` (§3.1 *Connection host*). Second, it anchors the cross-origin test
   (§13.1):
@@ -385,6 +411,7 @@ Examples of clause ids and tiers (illustrative, not exhaustive):
 | `PP-11-headers` | pipeline §11 | optional | `X-WebShell-*` header names |
 | `PP-9.5-synth` | pipeline §9.5 | optional | synthesized-resource behavior |
 | `RT-R7-case` | audit R7 | optional | case-sensitivity (declared, not mandated) |
+| `RT-9.5-head-explicit` | runtime §9.5 / audit R8 | optional | HEAD for an explicit `methods` list with GET but no HEAD (implementation-defined; not asserted) |
 
 ---
 
@@ -406,7 +433,7 @@ they run anywhere the adapter's declared interpreters exist.
 |------|------------------------------|
 | `empty/` | Empty root is valid (§4.2). Everything 404s; `/` is dir behavior. |
 | `plain-files/` | Literal file mapping (§6.1), MIME inference, raw bytes, nested paths, dot-segment normalization, root-escape rejection. Trailing-`?` disambiguation (§9.1/Q19): `/file.txt?download=1` strips the query and matches the file first, while a `?` followed by any raw `/` is per-command syntax and prevents the exact-file match. |
-| `directories/` | Directory behavior (§6.5): one dir holding a default file (named from the manifest's `default_index_files`, materialized per-impl), one without (listing or impl-defined, gated on `directory_listing`), trailing-slash equivalence and repeated-slash collapse (§9.1), directory used as an implied-cat suffix `/wc/docs` (§9.4), and `/docs/grep/needle/file.txt` → 404 (no command lookup after directory traversal, §9.2). This root ships its own `env/path` + `wc` and `grep` commands (from `_lib/`) and a real `docs/` directory, so the implied-cat-over-directory and no-command-in-directory vectors both have the fixtures they need. Because §6.5 is implementation-defined, the directory-serving cases run as capability-gated consistency checks, not flat MUST/SHOULD: the listing case asserts only that a non-error response is produced when `directory_listing` is declared (its body format is impl-defined and not matched). The `/wc/docs` implied-cat-over-directory case is likewise implementation-defined — pipeline §9.4 says it "may fail naturally" — so it asserts no fixed status; it checks only that the outcome is deterministic across repeats for a given impl, never failing one status versus another. |
+| `directories/` | Directory behavior (§6.5): one dir holding a default file (named from the manifest's `default_index_files`, materialized per-impl), one without (listing or impl-defined, gated on `directory_listing`), trailing-slash equivalence and repeated-slash collapse (§9.1), directory used as an implied-cat suffix `/wc/docs` (§9.4), and `/docs/grep/needle/file.txt` → 404 (no command lookup after directory traversal, §9.2). This root ships its own `env/path` + `wc` (the `linecount` fixture, §6.3) and `grep` (a tagging transform) commands and a real `docs/` directory, so the implied-cat-over-directory and no-command-in-directory vectors both have the fixtures they need. Because §6.5 is implementation-defined, the directory-serving cases run as capability-gated consistency checks, not flat MUST/SHOULD: the listing case asserts only that a non-error response is produced when `directory_listing` is declared (its body format is impl-defined and not matched). The `/wc/docs` implied-cat-over-directory case is likewise implementation-defined — pipeline §9.4 says it "may fail naturally" — so it asserts no fixed status; it checks only that the outcome is deterministic across repeats for a given impl, never failing one status versus another. |
 | `precedence/` | The §6.2 ladder. Contains a real file `wc` at root, a real file `bin/wc`, a real `grep/docs/file.txt`, and commands `wc`/`grep` on PATH. Proves exact-path-wins, `/bin/wc` serves file, `/grep/docs/file.txt` serves file. |
 | `commands-mf/` | Metadata-free commands only (arity 0). `cat`-style pass-through, identity, line-count. Proves implied cat, multi-stage pipelines, and that path args → 400 (§13.1, §13.2 of pipeline). |
 | `commands-arity/` | Commands with `arity 1`, `arity 2` (diff-like), `arity *`. Proves path-arg consumption, multi-resource via root-relative argv (§10.5), arity-star argv, and that a **path-arity** argument is percent-decoded and passed verbatim even when it contains a decoded `/` — `/echo1/a%2Fb/file.txt` with `echo1` arity 1 passes the single argv `a/b` (§5.1, Q21), distinct from the query-value encoding cases in `commands-query/`. |
@@ -417,9 +444,9 @@ they run anywhere the adapter's declared interpreters exist.
 | `pipelines/` | Realistic multi-stage pipelines (`jq`/`grep`/`wc` analogues with proper metadata) to validate the worked examples in pipeline §12 and runtime §8.4/§16.4. |
 | `stderr/` | Commands that write to stderr; validates `/&` boundary semantics (§8) and `stderr merge` metadata (§5.9), single-boundary scoping, rightmost-prefix rule. |
 | `exit-codes/` | Commands with deterministic exit codes + `exit` maps; validates default nonzero→400, custom maps, and pipefail aggregation (first-in-URL-order wins, §5.4). |
-| `methods/` | Commands declaring `methods GET POST`, GET-only, mutating-with-POST; validates 405, every-stage-must-permit-method, and HEAD-from-GET. The HEAD assertion is made only for the metadata-absent default (GET permitted ⇒ HEAD answered, body omitted), which §9.5 states unambiguously. Whether an *explicit* `methods` list that includes GET but omits HEAD suppresses HEAD is genuinely ambiguous in §9.5 (the suppression sentence conflicts with the GET⇒HEAD default), so the harness does not assert HEAD behavior for explicit-list commands — it is recorded as implementation-defined until the spec resolves it (tracked as audit R8). |
+| `methods/` | Commands declaring `methods GET POST`, GET-only, mutating-with-POST; validates 405, every-stage-must-permit-method, and HEAD-from-GET. The HEAD assertion is made only for the metadata-absent default (GET permitted ⇒ HEAD answered, body omitted), which §9.5 states unambiguously; the vector pairs the HEAD with its GET via `head_of` and asserts header parity plus `body_empty` (§7.1). Whether an *explicit* `methods` list that includes GET but omits HEAD suppresses HEAD is genuinely ambiguous in §9.5 (the suppression sentence conflicts with the GET⇒HEAD default), so the harness does not assert HEAD behavior for explicit-list commands — it is recorded as implementation-defined until the spec resolves it (tracked as audit R8). |
 | `mutation/` | PUT/DELETE/POST against plain files; validates literal targeting (§9.2/§9.4) and POST-to-plain→405 (§9.3). The MUST-level PUT/DELETE vectors target paths whose parent already exists, so the literal mutation is unambiguous; PUT into a missing parent is a separate vector gated on `put_creates_parents` (§4). Command-governed POST *write* semantics (e.g. the `sort output.txt/input.txt` redirection of §9.3) are command-specific, not defined by the core spec, so they are **not** a core MUST: this root ships a fixture command with declared write behavior and the vector asserts only consistency with that shipped command's contract (it exercises the impl's body/argv plumbing and method gating, not a portable redirection rule). **Run only on disposable copies.** |
-| `exec-rules/` | `exec` interpreter rules: exact basename match, glob match against relative path, first-match-wins, comment/blank handling, malformed rule→500, unresolved interpreter→500 (§7.2, §15.5). |
+| `exec-rules/` | `exec` interpreter rules: exact basename match, glob match against relative path, first-match-wins, comment/blank handling, malformed rule→500, unresolved interpreter→500 (§7.2, §15.5). Because the `exec` file's exact bytes *are* the assertion, this root is **pinned to `sh`** (`requires_interpreter: sh`) and exempt from the interpreter-substitution pass (§6.3); it is skipped for an implementation that does not declare `sh`. |
 | `encoding/` | Percent-encoding edge cases: `%5B%5D`, `%2F` in argv vs path, `%3F` literal `?` filename, `%26` literal-`&` command name, decoded NUL/`/` rejection in path segments. A decoded `/` or NUL is valid in an *argument* segment (§5.1, passed verbatim) but invalid in a *filesystem-lookup* segment (§9.1/§12.2); the spec marks the latter "invalid" without fixing a status, so those vectors assert `status_any: [400, 404]` rather than a single class. |
 | `synthesized/` | Optional synthesized-resource checks. Runs only when the capability manifest declares concrete synthesized fixture paths (for example `/docs/index`) and their expected status/body/header behavior; validates command-parse-beats-synth, exact-file-beats-synth precedence, and 400-is-terminal-no-fallback. |
 | `path-outside/` | `env/path` pointing to `../shared/bin`; validates command dirs outside root work (§7.1) while literal file serving still rejects root escape (§12.2). Materialization copies this root as part of a fixture bundle that preserves the sibling `shared/bin` relationship. |
@@ -466,7 +493,30 @@ Because the execution-metadata headers (`X-WebShell-*`, pipeline §11) are
 *optional*, the harness cannot rely on them to confirm that a pipeline was
 assembled and ordered correctly. The proof has to come from the response body.
 Fixture commands are therefore designed to make pipeline structure observable in
-their output bytes, following one **stage-tagging output contract**:
+their output bytes. Most follow one **stage-tagging output contract**; a few
+purpose-built commands deliberately deviate from it where a different, equally
+byte-stable shape is what a clause needs (the bare-count `linecount` and the
+write-redirecting `sort` below). The complete canonical set in `roots/_lib/` (each
+shipped as a byte-compatible `.sh` and `.py` variant, §"Interpreter binding") is:
+
+| `_lib/` command | Output shape | Used by |
+|-----------------|--------------|---------|
+| tagging transforms — `cat`/`identity`, `grep`, `jq`, `filter`, `count` | stage-tagging contract (below); `grep`/`filter` take `arity 1`, the rest arity 0 | `commands-mf/`, `precedence/` (`grep`), `directories/`, `pipelines/`, `stderr/` (`count`/`filter`) |
+| `linecount` (a `wc` analogue) | **bare** line count only (`^\s*N\s*$`); not stage-tagged — an explicit exception so a direct-file-access and a piped-execution test each have a byte-stable body | `precedence/` (`wc`), `directories/` (`wc`) |
+| argv-echo — `echo1` (arity 1), `echo2` (arity 2), `echoN` (arity *) | `argv=[a|b|...]` (plus file-existence flags for `echo2`) | `commands-arity/`, `commands-query/` |
+| `noisy` | `out:‹record›` to stdout, `err:‹record›` to stderr | `stderr/` |
+| `exitN` (a family, fixed exit code each) | one fixed line then exit `N` | `exit-codes/`, pipefail vectors |
+| `transform` | stage-tagging contract; reads request-body stdin | `body-input/` |
+| `sort` | **write-redirecting** per its declared `mutates`/method contract (runtime §9.3); not stage-tagged | `mutation/` |
+| `explain` | `parse-mode raw`; echoes its received raw suffix | `commands-meta/` (the `parse-mode raw` command) |
+
+A root is materializable for an implementation only if every command it serves has
+a `_lib/` variant for a declared interpreter (§"Interpreter binding"); the table
+above is the authoritative inventory `validate-roots` checks that against, so a
+root referencing a command absent from `_lib/` is a corpus bug.
+
+The stage-tagging contract (used by every command above except `linecount` and
+`sort`):
 
 - A transform stage reads stdin (treated as newline-separated records) and emits,
   for each record, a line `‹TAG›(‹argv…›):‹record›` — its own tag, its received
@@ -498,10 +548,10 @@ their output bytes, following one **stage-tagging output contract**:
   (§5.4) can be asserted by constructing a two-failure pipeline and checking which
   stage's status and diagnostic surface.
 
-`roots/_lib/` holds the canonical implementations of these scripts (one `.sh` and
-one `.py` variant of each), and each root's command files are copies of, or thin
-wrappers around, those canonical scripts so the output contract stays identical
-everywhere.
+`roots/_lib/` holds the canonical implementations of every command in the
+inventory table above (one `.sh` and one `.py` variant of each), and each root's
+command files are copies of, or thin wrappers around, those canonical scripts so a
+given command's output bytes are identical wherever it appears.
 
 #### Interpreter binding: one canonical form, substitution at materialization
 
@@ -533,6 +583,18 @@ interpreter the manifest declares; otherwise the whole root is skipped with a
 recorded reason (§7.3). `validate-roots --interpreter python3` validates the
 substituted form so the substitution pass itself is covered, not just the
 checked-in `sh` baseline.
+
+**Exception — roots whose behavior under test is the `exec`/interpreter binding.**
+The substitution pass rewrites the materialized `exec` file, so it must **not** be
+applied to a root that exists to test `exec` content itself. `exec-rules/` (§6.1)
+deliberately ships malformed rules, an unresolved-interpreter rule, glob and
+first-match cases whose exact bytes are the assertion; mechanically rewriting them
+would destroy the very thing under test (e.g. "fix" a malformed rule, or rewrite
+the intentionally-unresolvable interpreter token). Such roots are therefore
+**pinned to `sh`**: they declare `requires_interpreter: sh` (§7.3), are copied
+verbatim with no `exec` rewrite, and are skipped with a recorded reason for any
+implementation that does not declare `sh`. `validate-roots --interpreter <name>`
+likewise skips (does not substitute) an `sh`-pinned root.
 
 ### 6.4 Mutability and isolation
 
@@ -586,7 +648,9 @@ parse, no accidental executable bits that would mask "no exec bit needed" tests
 at run time (symlinks, §6.4; case-variant files, §6.6). `validate-roots
 --interpreter <name>` additionally materializes each root through the
 interpreter-substitution pass (§6.3) and validates the substituted tree, so a
-non-`sh` implementation's view of the corpus is checked too.
+non-`sh` implementation's view of the corpus is checked too. `sh`-pinned roots
+(those declaring `requires_interpreter: sh`, e.g. `exec-rules/`, §6.3) are exempt
+from substitution and are validated only in their checked-in `sh` form.
 
 Two kinds of fixture are deliberately **never checked in** and are instead
 synthesized into the materialized tree at run time, because they cannot be
@@ -682,6 +746,15 @@ A vector's `expect` block supports a small, declarative matcher set:
 
 - `status`, or `status_any: [..]` where the spec permits a choice.
 - `body_exact`, `body_contains`, `body_matches` (regex), `body_base64` (binary).
+- `body_empty`: assert the response carries no entity body. This is how a HEAD
+  vector asserts the omitted body (runtime §9.5) without an empty-string
+  comparison that would be ambiguous against a missing body.
+- `head_of`: names a sibling vector id whose request is the GET equivalent of this
+  HEAD. The harness runs both and asserts the HEAD response reproduces the GET's
+  status and headers (notably `Content-Type` and the `Content-Length` describing
+  the body the GET *would* return) while `body_empty` holds. This makes
+  "computed as for GET, body omitted" a real assertion rather than only an
+  empty-body check, and is the matcher the `methods/` HEAD-from-GET vector uses.
 - `header`: exact match; `header_present` / `header_absent`; `header_matches`.
 - `content_type` (with `mime.*` capability awareness — only enforced when the
   implementation declares MIME inference and a mapping for the extension).
@@ -742,8 +815,13 @@ common implementation bug is the *wrong* error class:
 
 A vector may carry `requires_capability: directory_listing` (etc.). The harness
 skips (with a recorded reason) when the implementation declares it absent, and
-runs it as a consistency check when present. `forbidden_when` handles the inverse
-(e.g. CORS headers must be absent unless cross-origin is explicitly enabled).
+runs it as a consistency check when present. `forbidden_when` handles the inverse:
+it asserts a header or behavior is **absent** under a given declared capability
+state. Note the harness only ever launches the implementation in its default
+configuration (§3), so it tests the cross-origin-**disabled** default only — the
+cross-origin response headers must be absent (§13.1) — and never drives a
+cross-origin-enabled launch (there is no adapter or manifest switch to enable it,
+and §3 forbids the adapter from pre-toggling defaults).
 
 A vector (or its root) may carry `requires_interpreter: python3` (etc.). A root is
 skipped wholesale, with the reason recorded, when none of the interpreters the
@@ -773,7 +851,7 @@ targets faithfully, or it can't test the very behavior under scrutiny:
   followed by exactly these framing headers, then the vector's own headers, then
   the body:
   - `Host:` set to the authority the harness dialed — the `origin_form` host plus
-    the launch port (e.g. `localhost:54321`). HTTP/1.1 servers may reject a
+    the launch port (e.g. `127.0.0.1:54321`). HTTP/1.1 servers may reject a
     missing `Host` with 400, so the harness always sends one; the value is fixed
     and identical regardless of how many `?` the request-target contains.
   - `Connection: close`, and **one fresh TCP connection per request** (no
@@ -823,7 +901,7 @@ harness itself.
   gate by simply never appearing. Seeding the full MUST set into `spec.py` is part
   of phase 1 (§12), and the coverage tool reports only on under-tested *known*
   clauses, never on clauses the registry forgot.
-- **Audit R1–R7 handling.** The `specs/audit.md` open items are *not* failures:
+- **Audit R1–R8 handling.** The `specs/audit.md` open items are *not* failures:
   - R1 (OPTIONS/CORS), R2 (`input file`/`output file`/`input none`), R3 (cwd
     override), R4 (range arity), R6 (`explain` contract) → vectors that assert the
     v1 *reserved* behavior (e.g. `input file` declared in metadata → 500; range
@@ -839,6 +917,13 @@ harness itself.
   - R5 (quoting in metadata/exec) → vectors confirm whitespace-separated tokens
     only; values needing quoting are out of scope (not tested as supported).
   - R7 (case sensitivity) → optional tier, gated on the capability declaration.
+  - R8 (HEAD for an explicit `methods` list that includes GET but omits HEAD) →
+    optional tier (`RT-9.5-head-explicit`), recorded as implementation-defined and
+    **not asserted**, because §9.5 sentences 1 and 2 contradict each other for this
+    case. Only the metadata-absent default (GET permitted ⇒ HEAD answered, body
+    omitted) is asserted, in the `methods/` root (§6.1). The clause appears in the
+    registry so coverage reporting (§9) accounts for the deliberate non-assertion
+    rather than treating it as a forgotten clause.
 - **Synthesized resources.** Because synthesis is implementation-defined, the
   manifest must declare concrete synthesized fixture targets before synthesized
   vectors run. A bare `synthesized_resources: true` is informational only; it
