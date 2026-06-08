@@ -120,7 +120,7 @@ No code coupling; the harness only runs processes and speaks HTTP.
 `adapters/<name>.toml`:
 
 ```toml
-name        = "reference-python"
+name        = "reference"
 # Command to start a server. Placeholders are substituted by the harness.
 #   {root} = absolute path to a materialized root directory
 #   {port} = TCP port the server MUST bind on localhost (only with port_mode = "assigned")
@@ -138,13 +138,13 @@ port_mode   = "assigned"
 ready       = { type = "http", path = "/", expect_status_any = [200, 404] }
 ready_timeout_sec = 10
 # Working directory for the start command (default: repo root).
-cwd         = "impls/reference-python"
+cwd         = "impls/reference"
 # Environment overrides for the child process. These must NOT change behavior the
 # harness probes for as a default (e.g. do not disable CORS here — the
 # cross-origin-default test in §13.1 relies on a plain, default launch).
 env         = {}
 # Path to this implementation's capability manifest (§4).
-capabilities = "impls/reference-python/wash.capabilities.json"
+capabilities = "impls/reference/wash.capabilities.json"
 ```
 
 The start command launches the implementation in its *default* configuration.
@@ -154,9 +154,19 @@ them through `env` or start arguments.
 
 ### 3.1 Lifecycle requirements the harness enforces
 
-- **Binding.** The implementation MUST bind a loopback address. Two strategies
-  (selected by `port_mode`, §3) avoid the pick-then-bind race that otherwise makes
-  `pytest -n` flaky:
+- **Connection host.** `runtime.md` §4.1 leaves the bind address
+  implementation-defined (`localhost`, `127.0.0.1`, `::1`, or a custom local
+  hostname). The harness therefore does not guess: the host it connects to is the
+  **authority of the manifest's `origin_form` (§4)** combined with the launch port,
+  and the implementation MUST bind that host. For example `origin_form:
+  http://localhost` ⇒ the implementation binds `localhost` and the harness derives
+  `base_url = http://localhost:<port>`; `origin_form: http://127.0.0.1` ⇒ bind and
+  dial `127.0.0.1`. This makes the loopback-host choice explicit and contractual
+  rather than a source of spurious launch failures, and it is the same
+  `origin_form` already used for the cross-origin test (§4/§13.1).
+- **Binding.** The implementation MUST bind a loopback address (the
+  `origin_form` host above). Two strategies (selected by `port_mode`, §3) avoid the
+  pick-then-bind race that otherwise makes `pytest -n` flaky:
   - `assigned` (default): the harness reserves a free port, substitutes `{port}`,
     and launches. Because another worker can claim that port between reservation
     and the child's `bind()`, the harness treats a fast non-ready exit whose
@@ -180,10 +190,15 @@ them through `env` or start arguments.
   before the next launch on it.
 - **Per-request deadline.** Every request is sent with a timeout
   (`per_request_timeout`, default 10s, overridable per vector for slow
-  pipelines). A request that does not complete in time is recorded as a distinct
-  `TIMEOUT` outcome — separate from a spec failure and from a launch failure — so
-  a command that hangs (e.g. blocking on stdin) cannot stall the run or be
-  misreported as non-conformance.
+  pipelines). A request that does not complete in time closes the socket and is
+  scored according to the vector's `timeout_means` (§7.1). The default is `fail`,
+  because for most vectors a hang is itself the symptom of non-conformance — most
+  importantly the closed-and-empty-stdin cases (pipeline §4: no input suffix and
+  no body), where a stage blocks forever precisely when the implementation failed
+  to close stdin. A vector that drives a legitimately slow pipeline sets
+  `timeout_means: timeout` to record the neutral `TIMEOUT` outcome instead, which
+  is kept separate from a spec failure and from a launch failure. Either way a
+  hung command cannot stall the run.
 
 ---
 
@@ -216,6 +231,8 @@ behavior plus whatever the implementation has declared.
   "max_error_body_bytes": 8192,
   "writes_enabled": true,
   "deletes_enabled": true,
+  "put_creates_parents": true,
+  "runtime_artifact_paths": [],
   "interpreters": ["sh", "python3"],
   "command_full_http_response": false
 }
@@ -232,7 +249,10 @@ Field notes:
   reproducible against the exact spec text it was made against. A manifest whose
   `spec_version` does not equal `spec.py`'s `SPEC_VERSION` is flagged.
 - `origin_form` is the scheme+authority the implementation serves on (e.g.
-  `http://localhost`). The harness uses it only for the cross-origin test (§13.1):
+  `http://localhost`). It serves two purposes. First, its host is the host the
+  harness binds and connects to, combined with the per-launch port, to form
+  `base_url` (§3.1 *Connection host*). Second, it anchors the cross-origin test
+  (§13.1):
   the request carries a fixed foreign `Origin` of `http://cross-origin.invalid`
   (the `.invalid` TLD is reserved by RFC 2606 and can never collide with
   `origin_form`), and "cross-origin" means precisely that this differs from
@@ -243,6 +263,20 @@ Field notes:
   `exec` rules. The harness uses it to **skip** any root whose command scripts
   require an interpreter the implementation does not declare (§7.3), recording
   the skip with a reason rather than failing for a permitted limitation.
+- `put_creates_parents` records whether PUT to a path whose parent directory does
+  not yet exist creates the intervening directories. runtime §9.2 leaves this to
+  implementation policy, so the MUST-level PUT vectors target paths whose parent
+  already exists (the literal mutation is then unambiguous), and the
+  missing-parent case is a separate capability-gated vector: when the flag is
+  true it asserts the parents and file are created, and when false it asserts an
+  allowed policy rejection (e.g. 404/403/409) and no tree mutation.
+- `runtime_artifact_paths` lists root-relative paths (caches, logs, indexes) the
+  implementation may legitimately create or update while serving, which runtime
+  §9.7 permits. The post-request tree diff (§6.4) ignores these paths, so a GET
+  that writes a permitted internal cache is not misreported as a GET-safety
+  violation. Any mutation **outside** the declared paths still fails
+  `RT-9.1-get-no-mutate`. An empty list means the implementation promises to
+  write nothing to the served tree on a GET, which is the strictest contract.
 
 How tiers use it:
 
@@ -307,8 +341,18 @@ Examples of clause ids and tiers (illustrative, not exhaustive):
 | `PP-6.1-core-arg` | pipeline §6.1 | MUST | `?arg=` is the only core query param |
 | `PP-6.3-arg-noncmd-400` | pipeline §6.3 | MUST | core arg on non-command → 400 |
 | `PP-8-stderr-prefix` | pipeline §8 | MUST | `/&` prefix merges one boundary |
+| `PP-8.1-amp-name` | pipeline §8.1 | MUST | leading `&` stripped pre-decode; `%26` is a name char |
 | `PP-9.2-no-cmd-in-dir` | pipeline §9.2 | MUST | no command lookup after dir traversal |
 | `PP-9.1-trailing-q` | pipeline §9.1 | MUST | trailing `?` is resource query first |
+| `PP-9.1-slash-collapse` | pipeline §9.1 | MUST | leading/trailing/repeated `/` collapse; trailing slash insignificant |
+| `PP-9.4-dir-suffix` | pipeline §9.4 | MUST | directory may be the implied-cat input suffix |
+| `PP-5.7-parse-raw` | pipeline §5.7 | MUST | `parse-mode raw` takes the encoded suffix, stops parsing |
+| `PP-5.7-method-all-stages` | pipeline §5.7 | MUST | every stage must permit the request method |
+| `PP-5.8-mime-final` | pipeline §5.8 | MUST | `mime` sets final-stage Content-Type; ignored mid-pipeline |
+| `PP-5.9-stderr-field` | pipeline §5.9 | MUST | `stderr discard`/`merge` semantics |
+| `PP-6-query-delim` | pipeline §6 | MUST | per-command query ends at next raw `/` |
+| `PP-6.2-query-disables-arity` | pipeline §6.2 | MUST | query argv disables metadata path arity |
+| `PP-7-mid-noncmd-400` | pipeline §7 | MUST | non-command middle segment (`/foo/bar/baz`) → 400 |
 | `RT-6.5-dir-index` | runtime §6.5 | optional | declared default file > listing |
 | `PP-11-headers` | pipeline §11 | optional | `X-WebShell-*` header names |
 | `PP-9.5-synth` | pipeline §9.5 | optional | synthesized-resource behavior |
@@ -334,7 +378,7 @@ they run anywhere the adapter's declared interpreters exist.
 |------|------------------------------|
 | `empty/` | Empty root is valid (§4.2). Everything 404s; `/` is dir behavior. |
 | `plain-files/` | Literal file mapping (§6.1), MIME inference, raw bytes, nested paths, dot-segment normalization, root-escape rejection. Trailing-`?` disambiguation (§9.1/Q19): `/file.txt?download=1` strips the query and matches the file first, while a `?` followed by any raw `/` is per-command syntax and prevents the exact-file match. |
-| `directories/` | Directory behavior (§6.5): one dir holding a default file (named from the manifest's `default_index_files`, materialized per-impl), one without (listing or impl-defined, gated on `directory_listing`), trailing-slash equivalence and repeated-slash collapse (§9.1), directory used as an implied-cat suffix `/wc/docs` (§9.4). This root ships its own `env/path` + a `wc` command (from `_lib/`) so the `/wc/docs` implied-cat-over-directory vector has a command to run. Because §6.5 is implementation-defined, the directory-serving cases run as capability-gated consistency checks, not flat MUST/SHOULD. |
+| `directories/` | Directory behavior (§6.5): one dir holding a default file (named from the manifest's `default_index_files`, materialized per-impl), one without (listing or impl-defined, gated on `directory_listing`), trailing-slash equivalence and repeated-slash collapse (§9.1), directory used as an implied-cat suffix `/wc/docs` (§9.4), and `/docs/grep/needle/file.txt` → 404 (no command lookup after directory traversal, §9.2). This root ships its own `env/path` + `wc` and `grep` commands (from `_lib/`) and a real `docs/` directory, so the implied-cat-over-directory and no-command-in-directory vectors both have the fixtures they need. Because §6.5 is implementation-defined, the directory-serving cases run as capability-gated consistency checks, not flat MUST/SHOULD: the listing case asserts only that a non-error response is produced when `directory_listing` is declared (its body format is impl-defined and not matched). The `/wc/docs` implied-cat-over-directory case is likewise implementation-defined — pipeline §9.4 says it "may fail naturally" — so it asserts no fixed status; it checks only that the outcome is deterministic across repeats for a given impl, never failing one status versus another. |
 | `precedence/` | The §6.2 ladder. Contains a real file `wc` at root, a real file `bin/wc`, a real `grep/docs/file.txt`, and commands `wc`/`grep` on PATH. Proves exact-path-wins, `/bin/wc` serves file, `/grep/docs/file.txt` serves file. |
 | `commands-mf/` | Metadata-free commands only (arity 0). `cat`-style pass-through, identity, line-count. Proves implied cat, multi-stage pipelines, and that path args → 400 (§13.1, §13.2 of pipeline). |
 | `commands-arity/` | Commands with `arity 1`, `arity 2` (diff-like), `arity *`. Proves path-arg consumption, multi-resource via root-relative argv (§10.5), arity-star argv, and that a **path-arity** argument is percent-decoded and passed verbatim even when it contains a decoded `/` — `/echo1/a%2Fb/file.txt` with `echo1` arity 1 passes the single argv `a/b` (§5.1, Q21), distinct from the query-value encoding cases in `commands-query/`. |
@@ -345,10 +389,10 @@ they run anywhere the adapter's declared interpreters exist.
 | `pipelines/` | Realistic multi-stage pipelines (`jq`/`grep`/`wc` analogues with proper metadata) to validate the worked examples in pipeline §12 and runtime §8.4/§16.4. |
 | `stderr/` | Commands that write to stderr; validates `/&` boundary semantics (§8) and `stderr merge` metadata (§5.9), single-boundary scoping, rightmost-prefix rule. |
 | `exit-codes/` | Commands with deterministic exit codes + `exit` maps; validates default nonzero→400, custom maps, and pipefail aggregation (first-in-URL-order wins, §5.4). |
-| `methods/` | Commands declaring `methods GET POST`, GET-only, mutating-with-POST; validates 405, HEAD-from-GET, every-stage-must-permit-method. |
-| `mutation/` | PUT/DELETE/POST against plain files; validates literal targeting (§9.2/§9.4), POST-to-plain→405 (§9.3), command-governed POST write semantics. **Run only on disposable copies.** |
+| `methods/` | Commands declaring `methods GET POST`, GET-only, mutating-with-POST; validates 405, every-stage-must-permit-method, and HEAD-from-GET. The HEAD assertion is made only for the metadata-absent default (GET permitted ⇒ HEAD answered, body omitted), which §9.5 states unambiguously. Whether an *explicit* `methods` list that includes GET but omits HEAD suppresses HEAD is genuinely ambiguous in §9.5 (the suppression sentence conflicts with the GET⇒HEAD default), so the harness does not assert HEAD behavior for explicit-list commands — it is recorded as implementation-defined until the spec resolves it (tracked as audit R8). |
+| `mutation/` | PUT/DELETE/POST against plain files; validates literal targeting (§9.2/§9.4) and POST-to-plain→405 (§9.3). The MUST-level PUT/DELETE vectors target paths whose parent already exists, so the literal mutation is unambiguous; PUT into a missing parent is a separate vector gated on `put_creates_parents` (§4). Command-governed POST *write* semantics (e.g. the `sort output.txt/input.txt` redirection of §9.3) are command-specific, not defined by the core spec, so they are **not** a core MUST: this root ships a fixture command with declared write behavior and the vector asserts only consistency with that shipped command's contract (it exercises the impl's body/argv plumbing and method gating, not a portable redirection rule). **Run only on disposable copies.** |
 | `exec-rules/` | `exec` interpreter rules: exact basename match, glob match against relative path, first-match-wins, comment/blank handling, malformed rule→500, unresolved interpreter→500 (§7.2, §15.5). |
-| `encoding/` | Percent-encoding edge cases: `%5B%5D`, `%2F` in argv vs path, `%3F` literal `?` filename, `%26` literal-`&` command name, NUL/`/` rejection in path segments. |
+| `encoding/` | Percent-encoding edge cases: `%5B%5D`, `%2F` in argv vs path, `%3F` literal `?` filename, `%26` literal-`&` command name, decoded NUL/`/` rejection in path segments. A decoded `/` or NUL is valid in an *argument* segment (§5.1, passed verbatim) but invalid in a *filesystem-lookup* segment (§9.1/§12.2); the spec marks the latter "invalid" without fixing a status, so those vectors assert `status_any: [400, 404]` rather than a single class. |
 | `synthesized/` | Optional synthesized-resource checks. Runs only when the capability manifest declares concrete synthesized fixture paths (for example `/docs/index`) and their expected status/body/header behavior; validates command-parse-beats-synth, exact-file-beats-synth precedence, and 400-is-terminal-no-fallback. |
 | `path-outside/` | `env/path` pointing to `../shared/bin`; validates command dirs outside root work (§7.1) while literal file serving still rejects root escape (§12.2). Materialization copies this root as part of a fixture bundle that preserves the sibling `shared/bin` relationship. |
 | `case/` | Files differing only by case; behavior gated on `case_sensitive_lookup` declaration (audit R7, optional). The case-colliding pair is **synthesized at run time** and the vectors skip on a case-insensitive host (§6.6) — it is not checked in. |
@@ -399,7 +443,13 @@ their output bytes, following one **stage-tagging output contract**:
 - A transform stage reads stdin (treated as newline-separated records) and emits,
   for each record, a line `‹TAG›(‹argv…›):‹record›` — its own tag, its received
   argv joined by commas, and the record it passed through. Tags are the command's
-  basename. Because each stage prepends its own tag, the final stdout encodes the
+  basename. **Record framing is fixed so `body_exact` is stable:** input is split on
+  LF (`\n`) only; a single trailing `\n` terminates the last record and does **not**
+  produce an extra empty record; an interior empty line *is* a record (emitted as
+  `‹TAG›(‹argv…›):`); and CR is treated as an ordinary data byte (fixtures are
+  authored LF-only, never CRLF). Each emitted line is LF-terminated. Fixture input
+  files are likewise authored with explicit, known trailing-newline state so the
+  expected output bytes are computable. Because each stage prepends its own tag, the final stdout encodes the
   exact stage order: `cat data | jq | grep needle` over a one-line input `x`
   yields `grep(needle):jq():x`, and any other assembly order produces a different,
   detectable string. This lets a single `body_exact` assertion pin both the set
@@ -466,6 +516,10 @@ checked-in `sh` baseline.
 - After such a vector, the harness diffs the temp tree against the pristine
   fixture to assert either *exactly* the intended mutation or no mutation at all
   (`RT-9.1-get-no-mutate`).
+- The diff ignores paths the manifest declares in `runtime_artifact_paths` (§4),
+  so an implementation that writes a permitted internal cache/log into the served
+  tree (runtime §9.7) is not misreported as mutating on GET. Any change outside
+  those declared paths still counts.
 - Roots with external relatives, such as `path-outside/` and its sibling
   `shared/bin`, are materialized as bundles so relative command-path entries keep
   the same shape they had in the canonical corpus. The bundle is laid out as
@@ -620,6 +674,13 @@ The schema rejects vectors that specify more than one body source. Omitted
 headers mean no extra headers beyond the HTTP minimum; omitted body means an
 empty request body.
 
+A vector may also carry an optional top-level `timeout_means` (§3.1) with the
+value `fail` (default) or `timeout`. It controls how a per-request deadline is
+scored: `fail` for vectors where the spec requires the request to complete — the
+closed-empty-stdin cases set it implicitly — and `timeout` only for vectors that
+exercise a deliberately slow pipeline, where exceeding the deadline is a neutral
+`TIMEOUT` rather than non-conformance.
+
 ### 7.2 Negative and ambiguity vectors
 
 The spec is explicit that certain URLs are invalid. These get first-class
@@ -627,6 +688,8 @@ vectors asserting the precise status (400 vs 404 vs 500 vs 405), since the most
 common implementation bug is the *wrong* error class:
 
 - metadata-free path args → 400 (`/wc/-l/file.txt`).
+- non-command middle segment with metadata-free commands → 400
+  (`/foo/bar/baz/file.txt` where `foo`/`baz` are commands and `bar` is not, §7).
 - core arg on non-command → 400.
 - malformed metadata → 500 (not 400).
 - POST to plain file → 405.
@@ -669,13 +732,21 @@ targets faithfully, or it can't test the very behavior under scrutiny:
 - Allow request bodies without text transcoding, including binary PUT/POST bodies
   and POST bodies used as command stdin.
 - Capture status, headers, and raw body bytes; never transcode the body.
-- Enforce a per-request timeout (§3.1) so a hung command surfaces as a `TIMEOUT`
-  outcome instead of blocking the run; the socket is closed and the result
-  recorded distinctly from a spec failure.
+- Frame the *response* correctly per RFC 7230 — honor `Content-Length` and
+  decode `Transfer-Encoding: chunked` so the captured body is the exact entity
+  bytes with no chunk headers leaking in. The "don't normalize" rule applies to
+  the request line only; response framing must be standards-correct or
+  `body_exact`/`body_base64` assertions silently corrupt.
+- Enforce a per-request timeout (§3.1); on expiry the socket is closed and the
+  result is scored per the vector's `timeout_means` (a hang on a closed-stdin
+  vector is non-conformance, not a neutral `TIMEOUT`).
 
-This likely means a thin client over a low-level socket/`http.client` rather than
-`requests`/`httpx` default behavior. The client module documents and tests this
-"don't normalize" property against a loopback echo so we trust the harness itself.
+This likely means a thin client that writes the raw request line over a
+socket but reuses `http.client`'s response parser for correct framing, rather
+than `requests`/`httpx`, whose request-side normalization would defeat the test.
+The client module documents and tests both properties — verbatim request-target
+out, RFC-correct entity bytes in — against a loopback echo so we trust the
+harness itself.
 
 ---
 
@@ -725,9 +796,13 @@ This likely means a thin client over a low-level socket/`http.client` rather tha
 
 Three reporters from one result model (`report.py`). Each (impl, root, vector)
 record carries one outcome — `PASS`, `FAIL`, `SKIP` (with reason), `WARN`
-(a failed SHOULD), `TIMEOUT` (§8), or `LAUNCH_FAILURE` (§3.1) — so an
-implementation problem, a permitted skip, a hung command, and a broken adapter are
-never conflated.
+(a failed SHOULD), `TIMEOUT` (§3.1/§8), or `LAUNCH_FAILURE` (§3.1) — so an
+implementation problem, a permitted skip, a deliberately-slow timeout, and a
+broken adapter are never conflated. `TIMEOUT` records only the neutral
+slow-pipeline case (`timeout_means: timeout`); a deadline exceeded where the spec
+requires the request to complete (the default `timeout_means: fail`, e.g. a stage
+blocking because stdin was never closed) is a `FAIL`, since the hang is the
+non-conformance itself.
 
 1. **Human summary** (stdout): per impl, a tiered table (MUST/SHOULD/optional),
    the first N failures with clause id, the exact request target, expected vs
@@ -750,7 +825,7 @@ are warnings unless `--strict` is passed.
 
 ```
 # Run everything against one implementation:
-wash-conformance run --adapter adapters/reference-python.toml
+wash-conformance run --adapter adapters/reference.toml
 
 # Compare several:
 wash-conformance run --adapter adapters/*.toml --report matrix
@@ -761,7 +836,7 @@ wash-conformance run --adapter A.toml --clause PP-5.4-exit-map
 
 # Validate the corpus / a manifest without running an impl:
 wash-conformance validate-roots
-wash-conformance validate-capabilities adapters/reference-python.toml
+wash-conformance validate-capabilities adapters/reference.toml
 
 # Coverage of the vectors against the clause registry:
 wash-conformance coverage
@@ -774,14 +849,17 @@ Under the hood these are pytest invocations with parametrization, so
 
 ## 12. Build order (suggested phases)
 
-0. **Minimal reference implementation.** A small `wash` server covering the MVP
+0. **Minimal reference implementation.** A small `wash` server (Python, launched as
+   `python -m wash.server`) covering the MVP
    surface (runtime.md §18): literal GET, basic directory behavior, PUT/DELETE,
    `env/path`, `exec`, `env/meta/<command>`, left-to-right resolution, child
    process per request, the error classes, and cross-origin off by default. It
    lives under `impls/reference/` with its own adapter and capability manifest and
    gets no special treatment from the harness — it is the green target the
-   vertical slice (phase 4) runs against, and "the reference is just another
-   adapter" keeps the harness honest and language-neutral.
+   vertical slice (phase 4) first runs against, and is then grown to full v1
+   coverage root-by-root in phase 5 (§12) so it stays the green oracle for the
+   whole corpus. "The reference is just another adapter" keeps the harness honest
+   and language-neutral throughout.
 1. **Skeleton + contracts.** `pyproject.toml`, the two JSON Schemas
    (capabilities, vector), `spec.py` clause registry seeded with MUST clauses,
    and `report.py` result model. No server interaction yet.
@@ -790,9 +868,19 @@ Under the hood these are pytest invocations with parametrization, so
    (`assigned` with bind-failure retry, and `ephemeral` port readout), root
    materialization (including interpreter substitution, §6.3, and runtime
    synthesis of symlink/case fixtures, §6.4/§6.6) + post-run diff.
-4. **First vertical slice:** the `precedence/` and `commands-mf/` roots plus their
-   vectors, run against a reference implementation, green end to end.
-5. **Fill the corpus** root by root (§6 table), writing vectors alongside each.
+4. **First vertical slice:** the `precedence/` and `commands-mf/` roots, with
+   their vectors authored in this phase (not deferred to phase 5), run against a
+   reference implementation, green end to end.
+5. **Fill the remaining corpus** root by root (§6 table), writing vectors
+   alongside each — and **extending the reference implementation to pass each
+   root's MUST vectors before moving to the next root.** The reference grows from
+   the phase-0 MVP to full v1 coverage here (path arity, query argv, exit maps +
+   pipefail, `parse-mode raw`, `stderr merge`, `methods`/405, `mime`), staying the
+   green oracle across the entire corpus. This is what makes the corpus
+   self-validating: a mis-authored MUST expectation is caught because a known-good
+   reference exercises it. A root is "done" only when its MUST vectors are green
+   against the reference; SHOULD/optional gaps in the reference are recorded in its
+   capability manifest rather than left as silent failures.
 6. **Capability gating** (§4) and the optional/SHOULD tiers.
 7. **Coverage + reporters** (§9, §10), then the comparison matrix.
 8. **CI wiring** and a `--strict` gate.
