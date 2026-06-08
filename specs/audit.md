@@ -372,15 +372,17 @@ the addendum resolves; mark partially-resolved ones with a pointer.
 
 ---
 
-## Q. Remaining genuine open questions (carried forward, with proposed answers)
+## Q. Carried-forward questions (ratified and applied)
 
-These come mostly from addendum §15 and runtime §17; proposed defaults given.
+These come mostly from addendum §15 and runtime §17. The resolutions below have been ratified and
+applied to the specs (pipeline_parsing.md §§5.2, 5.5, 5.6, 6.1, 8.1, 9.5, 10.3, 10.4, 11, 15; and
+runtime.md §§6.5, 7.3, 9.3, 17).
 
 | # | Question | Source | Proposed resolution |
 |---|---|---|---|
 | 1 | Variable arity beyond `arity *` (`0..*`, `1..3`)? | addendum §15.1 | Defer; support only `N` and `*` in v1. Ranges are a future extension. |
 | 2 | Is `argv` (in addition to `arg`) a reserved core query key? | addendum §15.2 | Reserve only `arg`; `argv` stays unreserved/command-specific in v1. |
-| 3 | Metadata grammar: quoting, escaping, comments, duplicate/invalid fields. | addendum §15.3, runtime §17.1 | Define: `#` line comments; whitespace-separated tokens; last-wins for duplicates; unknown field = ignore (warn); malformed value = 400 (see #5). |
+| 3 | Metadata grammar: quoting, escaping, comments, duplicate/invalid fields. | addendum §15.3, runtime §17.1 | Define: `#` line comments; whitespace-separated tokens; last-wins for duplicates; unknown field = ignore (warn); malformed value → 500 (see #5). |
 | 4 | Full normative list of metadata fields. | addendum §15.4 | Settle the union of both docs under one naming convention (item D): `arity`, `input`, `output`, `methods`, `mime`, `mutates`, `parse-mode`, `stderr`, `exit`. |
 | 5 | Malformed metadata → 400, 500, or impl-defined? | addendum §15.5, runtime | Recommend **500** (server-side config error, not a client error). |
 | 6 | stderr/stdout sanitization limits in error bodies. | addendum §15.6 | Impl-defined with a recommended byte cap (e.g. 8 KiB each); document the default. |
@@ -404,5 +406,5 @@ These come mostly from addendum §15 and runtime §17; proposed defaults given.
    alone splits args/boundaries.
 
 Lower-risk items (B, F, G, H, I, J, K, L, M, N, O, P) have proposed resolutions above and can
-proceed; none are blocked now that 1–4 are settled. The remaining genuinely open items are in the
-Q-table (section Q), where defaults are proposed but not yet ratified.
+proceed; none are blocked now that 1–4 are settled. The Q-table (section Q) items have been ratified
+and applied to the specs.

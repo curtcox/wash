@@ -157,6 +157,8 @@ text ["a", "b", "c.txt"]
 
 as argv.
 
+In v1, only fixed arity (a non-negative integer N) and arity * are defined. Range forms such as arity 0..* or arity 1..3 are reserved for a future extension and are treated as malformed metadata by a v1 runtime (§5.5, 500).
+
 ### 5.3 Input and Output
 
 Metadata defines stdin/stdout behavior separately from arity.
@@ -182,6 +184,26 @@ Metadata may override specific exit codes.
 Example:
 
 text exit 0=200 1=404 *=400 
+
+### 5.5 Metadata Grammar
+
+The metadata file is line-oriented:
+
+- One field per line: a field name followed by whitespace-separated values.
+- Blank lines are ignored.
+- A line whose first non-whitespace character is # is a comment and is ignored. An inline # is not treated as a comment.
+- Tokens are separated by ASCII whitespace. Quoting and escaping for values containing whitespace are not defined in v1; values requiring such handling are out of scope.
+- If a field appears more than once, the last occurrence wins.
+- An unrecognized field name is ignored; an implementation may warn.
+- A recognized field with a malformed value makes the metadata invalid; a request resolving to that command returns 500 Internal Server Error, since it is a server-side configuration error rather than a client error (§10.4).
+
+### 5.6 Normative Field List
+
+The defined metadata fields are:
+
+text arity input output methods mime mutates parse-mode stderr exit 
+
+All fields are optional; defaults apply for any absent field (§4).
 
 ## 6. Query String Attachment Rules
 
@@ -228,6 +250,8 @@ text /grep?arg=-i&arg=needle/file.txt
 parses as:
 
 sh cat file.txt | grep -i needle 
+
+In v1, arg is the only reserved core query parameter. All other parameter names — including argv — are command-specific and are not interpreted by the core parser.
 
 ### 6.2 Query Argv Overrides Metadata Arity
 
@@ -325,6 +349,10 @@ text /wc/&grep/file.txt
 
 The & prefixes grep and marks the grep→wc boundary (grep's output flowing into wc), not the cat file.txt → grep input boundary.
 
+### 8.1 Command Names Beginning With &
+
+A literal command name that begins with & is discouraged. To address such a command, percent-encode the leading & as %26 so it is not parsed as a stderr-merge prefix.
+
 ## 9. File, Directory, Command, and Synthesized Resource Precedence
 
 ### 9.1 Exact Filesystem Path Wins
@@ -395,6 +423,8 @@ Precedence:
 
 Therefore, if /docs/index is synthesized and /docs/index can also parse as a command pipeline, the command parse wins over the synthesized resource.
 
+A runtime may optionally emit a diagnostic header indicating that a synthesized resource was available but lost precedence to a command parse. This is optional and not required.
+
 ## 10. Error Reporting Rules
 
 ### 10.1 400 Bad Request
@@ -448,6 +478,8 @@ For nonzero command exits, the response may include:
 
 The response should not be generic-only unless an implementation intentionally suppresses detail for safety or policy reasons.
 
+The byte limits for included stdout/stderr are implementation-defined; the recommended default is a cap of 8 KiB each, with truncation indicated in the response.
+
 ### 10.4 500 Internal Server Error
 
 The exact classification of runtime failures as 500 is not fully normative.
@@ -460,7 +492,7 @@ Reasonable 500 cases include:
 - runtime filesystem failure,
 - implementation bug.
 
-Whether malformed metadata is 400 or 500 is implementation-defined unless specified elsewhere.
+Malformed metadata (an unrecognized value for a recognized field, or a reserved-but-undefined form such as a range arity) returns 500, since it is a server-side configuration error rather than a client error (§5.5).
 
 ### 10.5 Error Response Format
 
@@ -472,9 +504,7 @@ Plain text and JSON are both reasonable supported formats.
 
 Successful command responses may expose execution metadata through headers.
 
-These headers are suggested, not required.
-
-Examples:
+These headers are suggested, not required. When a runtime does expose execution metadata via headers, it should use the following standardized names rather than inventing its own:
 
 text X-WebShell-Command: grep X-WebShell-Pipeline: cat file.txt | grep needle X-WebShell-Source: root/path/file.txt 
 
@@ -631,31 +661,17 @@ Implementations should include tests for the following cases.
 - exact filesystem resources beat synthesized resources.
 - command parse beats synthesized resources.
 
-## 15. Remaining Open Questions
+## 15. Resolved Questions
 
-1. Whether variable arity forms beyond arity * are supported, such as:
+The questions previously open in this section are resolved as follows (see audit.md §Q):
 
-text arity 0..* arity 1..3 
-
-2. The exact reserved query namespace:
-   - arg is core.
-   - Whether argv is also core remains unresolved.
-   - Other names remain command-specific unless reserved elsewhere.
-
-3. Exact metadata grammar for quoting, escaping, comments, duplicate fields, and invalid fields.
-
-4. Full normative list of metadata fields beyond arity, input, output, methods, stderr, and exit.
-
-5. Whether malformed metadata returns 400, 500, or an implementation-defined status.
-
-6. Exact stderr/stdout sanitization limits for error responses.
-
-7. Exact behavior of cat over directories:
-   - The current rule is that a directory suffix may be passed to implied cat.
-   - The resulting command behavior is allowed to fail naturally.
-
-8. Whether command names literally beginning with & require escaping or are simply discouraged.
-
-9. Whether synthesized resources should be able to report why they lost precedence to a command parse.
-
-10. Whether optional execution metadata headers should have standardized names or remain implementation-defined suggestions.
+1. Variable arity: only fixed N and arity * are defined in v1; range forms (arity 0..*, arity 1..3) are reserved for a future extension and are malformed in v1 (§5.2, §5.5).
+2. Reserved query namespace: arg is the only reserved core parameter; argv and all other names are command-specific (§6.1).
+3. Metadata grammar: # line comments, whitespace-separated tokens, last-occurrence-wins for duplicates, unknown fields ignored, malformed values → 500 (§5.5).
+4. Normative metadata field list: arity, input, output, methods, mime, mutates, parse-mode, stderr, exit (§5.6).
+5. Malformed metadata → 500 (§5.5, §10.4).
+6. Error-body stdout/stderr limits: implementation-defined, recommended 8 KiB cap each with truncation indicated (§10.3).
+7. cat over a directory: allowed to fail naturally per the command's real behavior (§9.4).
+8. Command names beginning with &: discouraged; percent-encode the leading & as %26 (§8.1).
+9. Synthesized resource that lost to a command parse: may be reported via an optional diagnostic header; not required (§9.5).
+10. Execution metadata headers: standardized as X-WebShell-Command, X-WebShell-Pipeline, X-WebShell-Source (§11).

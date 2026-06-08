@@ -227,13 +227,13 @@ Implementations may synthesize responses for missing paths through implementatio
 
 ### 6.5 Directories
 
-Directories may support any of the following:
+When a request resolves to a directory, the default behavior is:
 
-1. Directory listing.
-2. index.html or analogous default file if present.
-3. Implementation-defined behavior.
+1. If an index.html (or analogous configured default file) is present, serve it.
+2. Otherwise, produce a directory listing.
+3. Implementations may substitute other implementation-defined behavior.
 
-The specification does not require one exclusive directory behavior.
+A configured default file takes precedence over a directory listing when both are possible.
 
 ## 7. Directory Layout
 
@@ -287,11 +287,11 @@ text root/env/meta/jq
 
 Metadata is plain line-oriented text. No metadata is required. Defaults apply for unspecified fields.
 
-Possible metadata fields include:
+The defined metadata fields are (see pipeline_parsing.md §5.6):
 
 text arity input output methods mime mutates parse-mode stderr exit 
 
-Exact field syntax may be implementation-defined, but the format should remain readable and Git-friendly.
+The line-oriented grammar (comments, whitespace-separated tokens, duplicate handling, and malformed-value behavior) and the normative field list are specified in pipeline_parsing.md §5.5 and §5.6. The format remains readable and Git-friendly.
 
 ## 8. URL Grammar and Examples
 
@@ -416,6 +416,8 @@ means approximately:
 sh sort input.txt > output.txt 
 
 Output redirection is not a core URL feature. The generic arity model would pass both segments as arguments (sort output.txt input.txt). The "write stdout to output.txt" behavior above must be supplied by a command-specific definition of sort, not inferred by the core parser.
+
+A POST whose path resolves to an ordinary file or directory with no command governing it has no defined write semantics in the core spec and returns 405 Method Not Allowed. Writing to a plain file path is the role of PUT (§9.2).
 
 ### 9.4 DELETE
 
@@ -878,21 +880,23 @@ The alias behavior is whatever errors implements.
 
 ## 17. Open Questions
 
-Several questions originally listed here are now resolved by pipeline_parsing.md; see audit.md for the reconciliation.
+Many questions originally listed here are now resolved by pipeline_parsing.md; see audit.md for the reconciliation.
 
-1. Exact line-oriented syntax for command metadata. (Partially resolved by pipeline_parsing.md §5; quoting, escaping, and comments still open — audit.md Q-table #3.)
-2. Exact line-oriented syntax for exec quoting and matching.
-3. Exact default behavior for POST to ordinary directories or files.
-4. Whether directory listing or index.html should take precedence when both are possible.
-5. How synthesized responses should be advertised or discovered.
-6. Whether there should be a conventional command for parse/explain/debug output.
-7. Whether a future spec should define reusable non-command URL fragments.
-8. Whether a future spec should define package-like distribution for command directories.
+Still open:
+
+1. Exact line-oriented syntax for exec interpreter-rule quoting and matching (env/exec). The command-metadata grammar is resolved in pipeline_parsing.md §5.5; the exec rule format is separate and remains open.
+2. Whether there should be a conventional command for parse/explain/debug output.
+3. Whether a future spec should define reusable non-command URL fragments.
+4. Whether a future spec should define package-like distribution for command directories.
+5. Broader discovery/advertisement of synthesized responses beyond the optional diagnostic header (pipeline_parsing.md §9.5, §11).
 
 Resolved and removed from this list:
 
 - Default arity for metadata-free commands → arity 0 (pipeline_parsing.md §4).
 - Syntax and semantics of /& → prefix form (pipeline_parsing.md §8 and §8.8 above; see audit.md item G).
+- Command metadata grammar and normative field list → pipeline_parsing.md §5.5, §5.6.
+- Default behavior for POST to ordinary directories or files → 405 unless a command governs the path (§9.3).
+- Directory listing vs. index.html precedence → default file wins, fallback listing (§6.5).
 
 ## 18. Minimal Viable Implementation
 
