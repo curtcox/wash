@@ -70,17 +70,26 @@ Execution model per run:
 for impl in implementations:
     caps = load_capability_manifest(impl)
     for root in roots_required_by_selected_vectors:
-        server = adapter.launch(impl, root=materialize(root), port=free_port())
-        wait_until_ready(server)
-        for vector in vectors_for(root):
-            if vector.tier == optional and not caps.supports(vector.feature):
-                record SKIP(reason="capability not declared")
-            else:
-                actual = httpclient.send(server.base_url, vector.request)
-                record compare(vector.expect, actual, caps)
-        adapter.shutdown(server)
+        for vector_group in isolation_groups(vectors_for(root)):
+            materialized = materialize(root, vector_group)
+            server = adapter.launch(impl, root=materialized.path, port=free_port())
+            wait_until_ready(server)
+            for vector in vector_group:
+                if should_skip(vector, caps):
+                    record SKIP(reason=skip_reason(vector, caps))
+                else:
+                    before = materialized.snapshot_if_needed(vector)
+                    actual = httpclient.send(server.base_url, vector.request)
+                    after = materialized.snapshot_if_needed(vector)
+                    record compare(vector.expect, actual, caps, before, after)
+            adapter.shutdown(server)
 emit reports
 ```
+
+`isolation_groups` keeps read-only vectors together when safe, but gives every
+mutation vector and every `no_mutation` assertion a pristine materialized root
+unless the vector explicitly declares an ordered scenario. This prevents one
+PUT/DELETE/POST test from contaminating later assertions.
 
 ---
 
@@ -177,6 +186,21 @@ This makes the harness fair (no penalty for permitted choices) while still
 catching the most common real bug: behavior that contradicts the
 implementation's own declared contract or the spec's MUSTs.
 
+Some normative behaviors have policy branches. For example, `runtime.md` §9.2
+and §9.4 require PUT/DELETE to target literal filesystem paths, but permit an
+implementation policy to disable writes or deletes. The harness therefore runs
+policy-aware MUST vectors:
+
+- when `writes_enabled: true`, PUT vectors assert the exact literal mutation;
+- when `writes_enabled: false`, PUT vectors assert an allowed policy rejection
+  such as 403 or 405 and no tree mutation;
+- when `deletes_enabled: true`, DELETE vectors assert the exact literal deletion;
+- when `deletes_enabled: false`, DELETE vectors assert an allowed policy
+  rejection and no tree mutation.
+
+This still tests the MUST-level contract without forcing a spec-permitted
+mutability policy.
+
 ---
 
 ## 5. Spec clause registry
@@ -198,7 +222,7 @@ Examples of clause ids and tiers (illustrative, not exhaustive):
 | `RT-9.2-put-literal` | runtime §9.2 | MUST | PUT targets literal path, no cmd parse |
 | `RT-9.5-head-from-get` | runtime §9.5 | MUST | GET implies HEAD, body omitted |
 | `RT-9.5-methods-405` | runtime §9.5 | MUST | method not in `methods` → 405 |
-| `RT-13.1-cors-default` | runtime §13.1 | MUST | cross-origin disabled by default |
+| `RT-13.1-cors-default` | runtime §13.1 | SHOULD | cross-origin disabled by default |
 | `PP-2-parse-algo` | pipeline §2 | MUST | normative parse order |
 | `PP-4-arity0-default` | pipeline §4 | MUST | metadata-free command = arity 0 |
 | `PP-4-implied-cat` | pipeline §4 | MUST | rightmost suffix fed via implied cat |
@@ -250,8 +274,8 @@ they run anywhere the adapter's declared interpreters exist.
 | `mutation/` | PUT/DELETE/POST against plain files; validates literal targeting (§9.2/§9.4), POST-to-plain→405 (§9.3), command-governed POST write semantics. **Run only on disposable copies.** |
 | `exec-rules/` | `exec` interpreter rules: exact basename match, glob match against relative path, first-match-wins, comment/blank handling, malformed rule→500, unresolved interpreter→500 (§7.2, §15.5). |
 | `encoding/` | Percent-encoding edge cases: `%5B%5D`, `%2F` in argv vs path, `%3F` literal `?` filename, `%26` literal-`&` command name, NUL/`/` rejection in path segments. |
-| `synthesized/` | A root whose adapter *may* synthesize `/docs/index`; validates command-parse-beats-synth and exact-file-beats-synth precedence, and 400-is-terminal-no-fallback (optional tier). |
-| `path-outside/` | `env/path` pointing to `../shared/bin`; validates command dirs outside root work (§7.1) while literal file serving still rejects root escape (§12.2). |
+| `synthesized/` | Optional synthesized-resource checks. Runs only when the capability manifest declares concrete synthesized fixture paths (for example `/docs/index`) and their expected status/body/header behavior; validates command-parse-beats-synth, exact-file-beats-synth precedence, and 400-is-terminal-no-fallback. |
+| `path-outside/` | `env/path` pointing to `../shared/bin`; validates command dirs outside root work (§7.1) while literal file serving still rejects root escape (§12.2). Materialization copies this root as part of a fixture bundle that preserves the sibling `shared/bin` relationship. |
 | `case/` | Files differing only by case; behavior gated on `case_sensitive_lookup` declaration (audit R7, optional). |
 
 ### 6.2 Worked example: `precedence/`
@@ -288,11 +312,17 @@ the fixture wraps it in a script with a frozen locale/output format.
 
 ### 6.4 Mutability and isolation
 
-- Read-only roots (most of them) may be served from a shared read-only copy.
-- Mutating roots (`mutation/`, any POST-write vectors) are deep-copied to a fresh
-  temp dir per launch. After the run, the harness diffs the temp tree against the
-  pristine fixture to assert *exactly* the intended mutation occurred and GET
-  vectors caused none (`RT-9.1-get-no-mutate`).
+- Read-only vectors may share a materialized root when they do not assert
+  post-request tree state.
+- Any vector with `no_mutation`, any vector with a `mutation` expectation, and
+  all PUT/DELETE/POST-write vectors get a fresh temp root unless they are part of
+  an explicitly ordered scenario.
+- After such a vector, the harness diffs the temp tree against the pristine
+  fixture to assert either *exactly* the intended mutation or no mutation at all
+  (`RT-9.1-get-no-mutate`).
+- Roots with external relatives, such as `path-outside/` and its sibling
+  `shared/bin`, are materialized as bundles so relative command-path entries keep
+  the same shape they had in the canonical corpus.
 
 ### 6.5 Generation vs checked-in
 
@@ -322,6 +352,8 @@ the harness's HTTP client (§8) sends it verbatim.
   request:
     method: GET
     target: "/wc"
+    headers: {}
+    body_base64: ""
   expect:
     status: 200
     body_exact: "i am a regular file named wc"
@@ -364,12 +396,25 @@ A vector's `expect` block supports a small, declarative matcher set:
   implementation declares MIME inference and a mapping for the extension).
 - `no_mutation`: assert the post-request root-tree diff is empty (GET safety).
 - `mutation`: assert a specific path was created/replaced/deleted with given
-  bytes (PUT/DELETE/command-write).
+  bytes (PUT/DELETE/command-write). Policy-aware mutation vectors may also carry
+  `when_writes_disabled` or `when_deletes_disabled` branches with allowed
+  rejection statuses and `no_mutation: true`.
 - `pipeline_header`: when `execution_metadata_headers` is declared, assert
   `X-WebShell-Pipeline` etc. reflect the expected effective pipeline.
 - `error_body`: when `Accept: application/json`, assert the error doc contains
   diagnostic fields (failing command, unexpected segment) — SHOULD tier, since
   exact text is non-normative (pipeline §10.1).
+
+A vector's `request` block supports:
+
+- `method` and raw `target` (required).
+- `headers` as exact wire header names and values, including `Origin` and
+  `Accept`.
+- `body_exact`, `body_base64`, or `body_file` for PUT/POST/stdin cases.
+
+The schema rejects vectors that specify more than one body source. Omitted
+headers mean no extra headers beyond the HTTP minimum; omitted body means an
+empty request body.
 
 ### 7.2 Negative and ambiguity vectors
 
@@ -406,6 +451,8 @@ targets faithfully, or it can't test the very behavior under scrutiny:
 - Preserve `%2F`, `%3F`, `%26`, `%5B%5D` exactly as authored in the vector.
 - Do not auto-normalize dot segments (let the server do §12.2 normalization).
 - Allow crafting cross-origin requests (an `Origin` header) to test §13.1.
+- Allow request bodies without text transcoding, including binary PUT/POST bodies
+  and POST bodies used as command stdin.
 - Capture status, headers, and raw body bytes; never transcode the body.
 
 This likely means a thin client over a low-level socket/`http.client` rather than
@@ -428,6 +475,10 @@ This likely means a thin client over a low-level socket/`http.client` rather tha
   - R5 (quoting in metadata/exec) → vectors confirm whitespace-separated tokens
     only; values needing quoting are out of scope (not tested as supported).
   - R7 (case sensitivity) → optional tier, gated on the capability declaration.
+- **Synthesized resources.** Because synthesis is implementation-defined, the
+  manifest must declare concrete synthesized fixture targets before synthesized
+  vectors run. A bare `synthesized_resources: true` is informational only; it
+  does not give the harness enough information to assert portable behavior.
 - **Per-implementation scorecard.** MUST pass rate (must be 100% to be
   "conformant"), SHOULD pass rate, declared optional features and their
   consistency results, and an explicit list of skipped tests with reasons.
@@ -514,4 +565,3 @@ treatment, which keeps the harness honest and language-neutral.
   gates Windows behind a capability/skip.
 - **Parallelism.** Per-(impl, root) isolation makes parallel runs safe; confirm
   port allocation and temp-root cleanup are robust under `pytest -n`.
-```
