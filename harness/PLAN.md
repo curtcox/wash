@@ -98,9 +98,10 @@ emit reports
 ```
 
 `isolation_groups` keeps read-only vectors together when safe, but gives every
-mutation vector and every `no_mutation` assertion a pristine materialized root
-unless the vector explicitly declares an ordered scenario. This prevents one
-PUT/DELETE/POST test from contaminating later assertions.
+mutation vector and every `no_mutation` assertion a pristine materialized root.
+Every vector is a single self-contained request, so no vector ever depends on the
+side effects of an earlier one; this prevents one PUT/DELETE/POST test from
+contaminating later assertions.
 
 A fresh server is launched per isolation group, not per root: because mutation
 groups each need a pristine materialized tree, the harness relaunches the
@@ -134,8 +135,10 @@ stop        = "SIGTERM"
 #                 prints "WASH-PORT <n>" to stdout as its first line; {port} is not
 #                 substituted and the harness reads the actual port from that line.
 port_mode   = "assigned"
-# How the harness decides the server is up (see §3.1).
-ready       = { type = "http", path = "/", expect_status_any = [200, 404] }
+# How the harness decides the server is up (see §3.1). The default probes "/" and
+# treats any well-formed HTTP status line as ready (status value is NOT matched,
+# because "/" is directory behavior and varies per materialized root, §3.1).
+ready       = { type = "http", path = "/" }
 ready_timeout_sec = 10
 # Working directory for the start command (default: repo root).
 cwd         = "impls/reference"
@@ -170,20 +173,41 @@ them through `env` or start arguments.
   - `assigned` (default): the harness reserves a free port, substitutes `{port}`,
     and launches. Because another worker can claim that port between reservation
     and the child's `bind()`, the harness treats a fast non-ready exit whose
-    output matches a configurable bind-failure pattern (default: contains
-    `EADDRINUSE`/`address already in use`) as a *retryable* launch, re-reserving a
-    new port up to a small fixed retry budget before declaring `LAUNCH_FAILURE`.
+    captured output matches a configurable bind-failure pattern (default regex,
+    case-insensitive: `EADDRINUSE|address already in use|address in use`) as a
+    *retryable* launch, re-reserving a new port and relaunching up to **5** times
+    before declaring `LAUNCH_FAILURE`.
   - `ephemeral`: the child binds an OS-chosen free port (bind `:0`) and prints
-    `WASH-PORT <n>` as its first stdout line. The harness reads the actual port
-    from that line and derives `base_url` from it. This eliminates the race
-    entirely and is the recommended mode for implementations that can report their
-    port. The reference implementation (§12) supports `ephemeral`.
+    `WASH-PORT <n>` as its **first line of stdout, before any other stdout
+    output**. The harness reads the actual port from that line and derives
+    `base_url` from it. This eliminates the race entirely and is the recommended
+    mode for implementations that can report their port. The reference
+    implementation (§12) supports `ephemeral`.
+- **Child output capture.** The harness captures the child's stdout and stderr for
+  the life of the process. Bind-failure pattern matching (assigned mode) scans
+  **both** streams. The `WASH-PORT` readout (ephemeral mode) reads **stdout only**
+  and requires line-buffered output (the implementation must flush the port line
+  immediately, not hold it in a block buffer). Captured output is attached to any
+  `LAUNCH_FAILURE` / `PROCESS_DIED` report for diagnosis.
 - **Root isolation.** Each launch gets a *fresh copy* of the root directory in a
   temp dir (§6.4), because PUT/DELETE/POST tests mutate the tree. The harness
   never runs mutation tests against the canonical corpus.
-- **Readiness.** The harness polls `ready` until success or timeout. An
-  implementation that never becomes ready is reported as a launch failure, not a
-  spec failure (so a broken adapter is distinguishable from a broken runtime).
+- **Readiness.** The harness polls `ready` until success or timeout. "Success"
+  means the probe got back a well-formed HTTP status line on a fresh connection;
+  the status *value* is not matched, because the probe runs against whatever
+  materialized corpus root this launch received and `/` is directory behavior
+  (implementation-defined: 200 with a listing, 404 for an empty root, 403, etc.).
+  Matching a status allow-list here would spuriously fail readiness for a healthy
+  server, so the harness only requires that the server answers HTTP at all. An
+  implementation that never answers within `ready_timeout_sec` is reported as a
+  launch failure, not a spec failure (so a broken adapter is distinguishable from
+  a broken runtime).
+- **Liveness between vectors.** Within an isolation group the harness checks the
+  child is still alive before each vector and treats a connection-refused /
+  connection-reset result as evidence the process died. A server that exits or
+  crashes mid-group is reported as `PROCESS_DIED` (§10) for the affected vector and
+  the remainder of the group, with the captured child output attached — never as a
+  per-vector spec `FAIL`, so a crash is not conflated with a wrong answer.
 - **One root per instance.** Per `runtime.md` §4.2/§12.1, a server maps exactly
   one root. The harness relaunches for each root rather than reconfiguring.
 - **Teardown.** SIGTERM, then SIGKILL after a grace period. Port must be released
@@ -244,9 +268,13 @@ Field notes:
   canonical version string is the single source of truth held in
   `conformance/spec.py` as `SPEC_VERSION` (currently `"1"`); the spec **commit** is
   resolved at run time from `git rev-parse HEAD` of the repository containing
-  `specs/` (falling back to `unknown` outside a checkout). The harness records the
-  pair as `<spec-version>@<spec-commit>` in every report so a conformance claim is
-  reproducible against the exact spec text it was made against. A manifest whose
+  `specs/` (falling back to `unknown` outside a checkout). If `git status
+  --porcelain -- specs/` is non-empty the commit is suffixed `+dirty`, because
+  uncommitted edits to `specs/` mean the recorded commit's text no longer matches
+  what was actually tested. The harness records the triple as
+  `<spec-version>@<spec-commit>[+dirty]` in every report so a conformance claim is
+  reproducible against the exact spec text it was made against (and a `+dirty`
+  claim is visibly non-reproducible). A manifest whose
   `spec_version` does not equal `spec.py`'s `SPEC_VERSION` is flagged.
 - `origin_form` is the scheme+authority the implementation serves on (e.g.
   `http://localhost`). It serves two purposes. First, its host is the host the
@@ -511,8 +539,10 @@ checked-in `sh` baseline.
 - Read-only vectors may share a materialized root when they do not assert
   post-request tree state.
 - Any vector with `no_mutation`, any vector with a `mutation` expectation, and
-  all PUT/DELETE/POST-write vectors get a fresh temp root unless they are part of
-  an explicitly ordered scenario.
+  all PUT/DELETE/POST-write vectors get a fresh temp root. Each such vector is a
+  single request evaluated against a pristine tree; there are no multi-request
+  ordered scenarios, so the post-request diff always attributes any change to the
+  one request under test.
 - After such a vector, the harness diffs the temp tree against the pristine
   fixture to assert either *exactly* the intended mutation or no mutation at all
   (`RT-9.1-get-no-mutate`).
@@ -534,7 +564,10 @@ checked-in `sh` baseline.
   The `directories/` default-file fixture is created using the first entry of the
   manifest's `default_index_files` (so an implementation whose default file is not
   `index.html` is still tested against its own declared default), and is skipped
-  entirely when that capability is absent.
+  entirely when that capability is absent. The materializer writes a fixed,
+  byte-stable marker as the file's content (`wash-fixture: default-index\n`) so the
+  serving vector can assert it with `body_exact` regardless of which filename the
+  implementation declared.
 - Symlink fixtures (for the §9.1 default-reject test) are **not** checked in as
   real symlinks; they are synthesized into the materialized tree at run time and
   only when the platform supports symlink creation and the manifest declares a
@@ -674,6 +707,14 @@ The schema rejects vectors that specify more than one body source. Omitted
 headers mean no extra headers beyond the HTTP minimum; omitted body means an
 empty request body.
 
+`vector.schema.json` is the single source of truth for the full vector shape:
+every matcher and condition introduced anywhere in this document — the `expect`
+matchers above, `timeout_means` (§3.1), the capability/interpreter gates
+`requires_capability` / `forbidden_when` / `requires_interpreter` (§7.3), and the
+policy branches `when_writes_disabled` / `when_deletes_disabled` (§4) — is defined
+as a field in that schema so none is silently dropped. A field described in prose
+but missing from the schema is a corpus bug caught by `validate-roots`.
+
 A vector may also carry an optional top-level `timeout_means` (§3.1) with the
 value `fail` (default) or `timeout`. It controls how a per-request deadline is
 scored: `fail` for vectors where the spec requires the request to complete — the
@@ -728,6 +769,20 @@ targets faithfully, or it can't test the very behavior under scrutiny:
   byte-for-byte, without re-encoding or collapsing.
 - Preserve `%2F`, `%3F`, `%26`, `%5B%5D` exactly as authored in the vector.
 - Do not auto-normalize dot segments (let the server do §12.2 normalization).
+- **Request-line contract.** Each request is `‹METHOD› ‹raw-target› HTTP/1.1`
+  followed by exactly these framing headers, then the vector's own headers, then
+  the body:
+  - `Host:` set to the authority the harness dialed — the `origin_form` host plus
+    the launch port (e.g. `localhost:54321`). HTTP/1.1 servers may reject a
+    missing `Host` with 400, so the harness always sends one; the value is fixed
+    and identical regardless of how many `?` the request-target contains.
+  - `Connection: close`, and **one fresh TCP connection per request** (no
+    keep-alive reuse). This keeps the sequential vectors in an isolation group
+    independent and makes the liveness check (§3.1) a clean connect-per-request.
+  - `Content-Length` for any request carrying a body. The harness does not send
+    chunked request bodies.
+  A vector may add or override `Origin`, `Accept`, etc.; it may not change the
+  framing rules above (they are what make the raw-target test meaningful).
 - Allow crafting cross-origin requests (an `Origin` header) to test §13.1.
 - Allow request bodies without text transcoding, including binary PUT/POST bodies
   and POST bodies used as command stdin.
@@ -737,6 +792,12 @@ targets faithfully, or it can't test the very behavior under scrutiny:
   bytes with no chunk headers leaking in. The "don't normalize" rule applies to
   the request line only; response framing must be standards-correct or
   `body_exact`/`body_base64` assertions silently corrupt.
+- **HEAD responses carry no body.** The response parser must be told the request
+  method so that a HEAD response — which may carry a `Content-Length` describing
+  the body the equivalent GET *would* return — is read as header-only and does not
+  block waiting for entity bytes that never arrive. The `methods/` root exercises
+  HEAD-from-GET (§9.5), so a parser that ignores the method would hang there and be
+  mis-scored against `timeout_means: fail`.
 - Enforce a per-request timeout (§3.1); on expiry the socket is closed and the
   result is scored per the vector's `timeout_means` (a hang on a closed-stdin
   vector is non-conformance, not a neutral `TIMEOUT`).
@@ -754,7 +815,14 @@ harness itself.
 
 - **Clause coverage report.** Cross-reference the clause registry (§5) with
   vectors; emit a table of clauses with zero vectors so the suite's own gaps are
-  visible. Target 100% MUST-clause coverage before declaring the harness v1.
+  visible. Target 100% MUST-clause coverage before declaring the harness v1. The
+  zero-vector check is only as good as the registry's completeness: the §5 table is
+  illustrative, so the real `spec.py` registry must enumerate **every** MUST clause
+  — including ones not shown there, e.g. runtime §6.4 (missing path → 404) and
+  §10.7 (commands consuming URL expressions) — or an untested clause passes the
+  gate by simply never appearing. Seeding the full MUST set into `spec.py` is part
+  of phase 1 (§12), and the coverage tool reports only on under-tested *known*
+  clauses, never on clauses the registry forgot.
 - **Audit R1–R7 handling.** The `specs/audit.md` open items are *not* failures:
   - R1 (OPTIONS/CORS), R2 (`input file`/`output file`/`input none`), R3 (cwd
     override), R4 (range arity), R6 (`explain` contract) → vectors that assert the
@@ -796,9 +864,12 @@ harness itself.
 
 Three reporters from one result model (`report.py`). Each (impl, root, vector)
 record carries one outcome — `PASS`, `FAIL`, `SKIP` (with reason), `WARN`
-(a failed SHOULD), `TIMEOUT` (§3.1/§8), or `LAUNCH_FAILURE` (§3.1) — so an
-implementation problem, a permitted skip, a deliberately-slow timeout, and a
-broken adapter are never conflated. `TIMEOUT` records only the neutral
+(a failed SHOULD), `TIMEOUT` (§3.1/§8), `LAUNCH_FAILURE` (§3.1, the server never
+became ready), or `PROCESS_DIED` (§3.1, the server was ready but exited or crashed
+mid-group) — so an implementation problem, a permitted skip, a deliberately-slow
+timeout, a broken adapter, and a runtime crash are never conflated. `PROCESS_DIED`
+is not a spec `FAIL`: it carries the captured child output and, like
+`LAUNCH_FAILURE`, points at the process rather than at a clause. `TIMEOUT` records only the neutral
 slow-pipeline case (`timeout_means: timeout`); a deadline exceeded where the spec
 requires the request to complete (the default `timeout_means: fail`, e.g. a stage
 blocking because stdin was never closed) is a `FAIL`, since the hang is the
@@ -816,8 +887,10 @@ Optional: a **conformance matrix** (markdown) — implementations as columns,
 clauses as rows, ✓/✗/– (skip) cells — to compare implementations at a glance and
 track an implementation's progress over time.
 
-A non-zero exit code if any MUST fails (gate for CI); SHOULD/optional failures
-are warnings unless `--strict` is passed.
+A non-zero exit code if any MUST fails, or if any `LAUNCH_FAILURE` or
+`PROCESS_DIED` occurs (gate for CI — an implementation that cannot stay up cannot
+be called conformant); SHOULD/optional failures are warnings unless `--strict` is
+passed.
 
 ---
 
