@@ -1,5 +1,7 @@
 # Addendum: URL Pipeline Parsing and Metadata-Free Command Arity
 
+> This addendum extends runtime.md. Where the two specs interact, the reconciliation decisions are recorded in audit.md.
+
 ## 1. Parsing Problem Statement
 
 The runtime maps a local HTTP URL space to a single project/root directory. A URL path may denote:
@@ -289,7 +291,7 @@ sh foo bar baz file.txt
 
 It corresponds to shell |&.
 
-The syntax is attached as a prefix to the command segment on the left side of the boundary in URL order.
+The token is written as a prefix on the command segment whose output boundary is to be merged. That boundary is the connection from the prefixed command to the stage appearing immediately before it in URL order (the prefixed command's downstream consumer in data-flow order).
 
 Example:
 
@@ -315,13 +317,13 @@ text /count/&filter/&noisy/file.txt
 
 Each /& affects only the boundary it marks.
 
-/& is legal before the rightmost command stage, but it modifies that command’s connection to the next command to its left. It does not modify the implied cat input connection.
+A prefix is legal on the rightmost command stage; it modifies that command's output connection to the stage appearing immediately before it in URL order (its downstream consumer), never the implied cat input connection feeding it.
 
 Example:
 
 text /wc/&grep/file.txt 
 
-The /& marks the boundary between grep and wc, not the boundary between cat file.txt and grep.
+The & prefixes grep and marks the grep→wc boundary (grep's output flowing into wc), not the cat file.txt → grep input boundary.
 
 ## 9. File, Directory, Command, and Synthesized Resource Precedence
 

@@ -1,5 +1,7 @@
 # URL Filesystem Router Runtime Specification
 
+> This core spec is extended by pipeline_parsing.md (URL pipeline parsing and metadata-free arity). Where the two interact, the reconciliation decisions are recorded in audit.md.
+
 ## 1. Problem Statement
 
 Programmers routinely compose shell commands, filesystem paths, pipes, aliases, scripts, and environment-driven behavior into powerful reusable workflows. Browsers and URLs provide a universal, inspectable, bookmarkable interface, but ordinary web applications usually hide composition behind application-specific UI and server-side routing.
@@ -10,9 +12,9 @@ The core idea is that a URL should be almost as readable and reusable as a shell
 
 text http://local/grep/needle/jq/haystack.json 
 
-corresponds approximately to:
+corresponds approximately to (given grep has arity 1):
 
-sh jq haystack.json | grep needle 
+sh cat haystack.json | jq | grep needle 
 
 The system is intended for programmers, should work in an ordinary browser with no extension, and should also provide a reasonable experience through tools such as curl.
 
@@ -101,11 +103,11 @@ Example:
 
 text /grep/needle/jq/haystack.json 
 
-maps approximately to:
+maps approximately to (given grep has arity 1):
 
-sh jq haystack.json | grep needle 
+sh cat haystack.json | jq | grep needle 
 
-Command resolution proceeds left-to-right, even though data flow is generally right-to-left.
+Command resolution proceeds left-to-right, even though data flow is generally right-to-left. The rightmost file is supplied to the pipeline through an implied cat (see pipeline_parsing.md §4), not as a positional argument.
 
 ### 4.6 Argument Segment
 
@@ -125,7 +127,7 @@ Example:
 
 text /grep?pattern=needle&ignore-case=true/jq?filter=.items[]/haystack.json 
 
-Per-command query strings are explicitly supported.
+Per-command query strings are explicitly supported. The core argv parameter is arg (repeatable); names such as pattern, filter, and ignore-case shown here are command-specific and are interpreted by the command itself, not by the core parser (pipeline_parsing.md §6.1). A URL may carry more than one ? — one per command segment. This is valid URI syntax (RFC 3986 §3.4 permits ? and / within a query), and browsers and curl transmit the full request-target unchanged, so the runtime parses it directly; see §12.2.
 
 ## 5. Terminology
 
@@ -174,17 +176,26 @@ and returns the raw file.
 
 ### 6.2 Command Shadowing
 
-If a segment appears in command position and a command by that name exists on the command path, the command takes precedence over an ordinary file of the same name.
+An exact full-path filesystem resource always wins first (see §6.3). Command parsing begins only when the complete request path does not resolve to a file. The resolution precedence ladder is (see also pipeline_parsing.md §9.5):
+
+1. Exact full-path filesystem resource.
+2. Command parse.
+3. Synthesized resource.
+4. 404 Not Found.
+
+Once command parsing has begun, if a segment appears in command position and a command by that name exists on the command path, the command takes precedence over an ordinary file of the same name.
 
 Example:
 
 text /wc/foo.txt 
 
-If wc exists on the command path, this executes approximately:
+If no file root/wc/foo.txt exists and wc exists on the command path, this executes approximately:
 
-sh wc foo.txt 
+sh cat foo.txt | wc 
 
-even if root/wc also exists as a regular file.
+even if root/wc also exists as a regular file. (Because root/wc is a regular file, root/wc/foo.txt cannot exist, so the exact-path check fails and command parsing proceeds.)
+
+For the single-segment case /wc, if root/wc exists as a file the exact filesystem path wins and the file is served, even though wc is also a command.
 
 ### 6.3 Direct File Access to Commands
 
@@ -212,7 +223,7 @@ If no valid parse exists and no file/resource can be resolved, the default respo
 
 text 404 Not Found 
 
-Implementations may synthesize responses for missing paths through implementation-defined directory or resource behavior.
+Implementations may synthesize responses for missing paths through implementation-defined directory or resource behavior. Synthesized resources rank below command parses in the precedence ladder (see §6.2 and pipeline_parsing.md §9.5).
 
 ### 6.5 Directories
 
@@ -278,7 +289,7 @@ Metadata is plain line-oriented text. No metadata is required. Defaults apply fo
 
 Possible metadata fields include:
 
-text arity input-mode output-mode methods mime mutates parse-mode exit-status-mode stderr-mode 
+text arity input output methods mime mutates parse-mode stderr exit 
 
 Exact field syntax may be implementation-defined, but the format should remain readable and Git-friendly.
 
@@ -298,31 +309,33 @@ text /wc/arbitrary.txt
 
 Approximate shell equivalent:
 
-sh wc arbitrary.txt 
+sh cat arbitrary.txt | wc 
 
 ### 8.3 Pipeline
 
 text /grep/needle/jq/haystack.json 
 
-Approximate shell equivalent:
+Approximate shell equivalent (given grep has arity 1):
 
-sh jq haystack.json | grep needle 
+sh cat haystack.json | jq | grep needle 
 
 ### 8.4 Longer Pipeline
 
-text /wc/-l/grep/needle/jq/.items%5B%5D/cat/haystack.json 
+text /wc/-l/grep/needle/jq/.items%5B%5D/haystack.json 
 
-Approximate shell equivalent:
+Approximate shell equivalent (given wc, grep, and jq each have arity 1):
 
 sh cat haystack.json | jq '.items[]' | grep needle | wc -l 
 
-Flags are ordinary argument segments.
+Flags are ordinary argument segments. The input file is supplied through an implied cat; no explicit cat segment is needed.
 
 ### 8.5 Per-command Query Strings
 
 text /grep?pattern=needle&ignore-case=true/jq?filter=.items[]/haystack.json 
 
-This supplies named arguments to individual command segments.
+This supplies named arguments to individual command segments. Here pattern, filter, and ignore-case are command-specific parameters; the core argv parameter is arg. The metadata-free core form is:
+
+text /grep?arg=-i&arg=needle/jq?arg=.items%5B%5D/haystack.json 
 
 ### 8.6 Argument Collision With Command Name
 
@@ -330,11 +343,11 @@ Given grep with arity 1:
 
 text /grep/jq/haystack.txt 
 
-means:
+means (given grep has arity 1):
 
-sh grep jq haystack.txt 
+sh cat haystack.txt | grep jq 
 
-Here jq is a literal pattern argument, not a command, because grep consumes one argument before its input suffix.
+Here jq is a literal pattern argument, not a command, because grep consumes one argument before its input suffix. Argument segments are passed verbatim as strings; the runtime does not resolve them to file contents. Only the implied-cat input suffix is read as bytes.
 
 ### 8.7 Ambiguous Cases
 
@@ -352,13 +365,17 @@ as a command.
 
 ### 8.8 Standard Error Pipeline Marker
 
-The separator /& may be used instead of / to combine stdout and stderr, analogous to shell |&.
+The token /& marks a single pipeline boundary as a stdout+stderr merge, analogous to shell |&. It is written as a prefix on a command segment (pipeline_parsing.md §8); it merges that command's output boundary — the connection to the stage appearing immediately before it in URL order (its downstream consumer in data-flow order).
 
-Example form:
+Example:
 
-text /grep/needle/& noisy-command/input.txt 
+text /wc/-l/&grep/error/file.txt 
 
-The exact URL grammar for /& should preserve normal URL parsing constraints while allowing a pipeline stage to receive combined stdout and stderr.
+parses as (given wc and grep have arity 1):
+
+sh cat file.txt | grep error |& wc -l 
+
+The & prefixes grep and merges only the grep→wc boundary. It does not affect the implied-cat connection feeding grep, and it does not place the rest of the pipeline into stderr-merge mode.
 
 ## 9. Resource Lifecycle
 
@@ -398,6 +415,8 @@ means approximately:
 
 sh sort input.txt > output.txt 
 
+Output redirection is not a core URL feature. The generic arity model would pass both segments as arguments (sort output.txt input.txt). The "write stdout to output.txt" behavior above must be supplied by a command-specific definition of sort, not inferred by the core parser.
+
 ### 9.4 DELETE
 
 DELETE may delete a filesystem resource where supported.
@@ -416,7 +435,7 @@ Implementations may support additional standard HTTP methods such as:
 
 text HEAD PATCH OPTIONS 
 
-Normal HTTP semantics should be preserved.
+Normal HTTP semantics should be preserved. A request method not permitted by a command's methods metadata returns 405 Method Not Allowed. In a multi-stage pipeline, the request method must be permitted by every stage that declares methods metadata.
 
 ### 9.6 Refresh Behavior
 
@@ -444,9 +463,9 @@ Resolution sees grep first, then determines that grep consumes needle as an argu
 
 text /jq/haystack.json 
 
-Data flow evaluates:
+Data flow evaluates (given grep has arity 1):
 
-sh jq haystack.json | grep needle 
+sh cat haystack.json | jq | grep needle 
 
 ### 10.2 Arity
 
@@ -458,29 +477,31 @@ text /grep/needle/jq/haystack.json
 
 means:
 
-sh jq haystack.json | grep needle 
+sh cat haystack.json | jq | grep needle 
 
-Arity may be supplied through metadata. If missing, default shell-like behavior applies.
+Arity may be supplied through metadata. If missing, the command has arity 0 and receives input on stdin (pipeline_parsing.md §4). Argument segments are passed to the command as literal strings; the runtime does not resolve them to file contents. Only the implied-cat input suffix is read as bytes.
 
-### 10.3 Next Known Command Boundary
+### 10.3 Boundaries Are Determined by Arity Alone
 
-The parser may treat the next known command on the command path as a pipeline boundary when compatible with the current command’s arity.
+A command's argument segments are exactly its declared arity; the next pipeline stage begins immediately after. The parser does not infer a boundary from which segments happen to name commands on the command path (pipeline_parsing.md §7).
 
 Example:
 
 text /foo/bar/baz/file.txt 
 
-If foo and baz are commands and bar is an argument to foo, this may parse as:
+If foo and baz are commands, bar is not, and no metadata exists, every command has arity 0, so foo consumes no arguments and bar is an unexpected segment. The URL is invalid and returns 400 Bad Request. It does not parse as:
 
 sh baz file.txt | foo bar 
 
-### 10.4 Ambiguity
+To express that pipeline, give foo arity 1 (so it consumes bar) via metadata, or use query argv.
 
-If a URL has multiple possible parses and neither metadata nor query strings resolve the ambiguity, the default response is:
+### 10.4 Invalid Parses
+
+Given the filesystem, command path, and metadata, parsing is deterministic (pipeline_parsing.md §2); there is no genuine multiple-parse ambiguity to resolve. The default response is:
 
 text 400 Bad Request 
 
-The response should include information about the ambiguity.
+returned when command parsing begins but the URL violates arity, query, boundary, or metadata rules. The response should include information about why the parse failed.
 
 ### 10.5 Commands Consuming Multiple Resources
 
@@ -510,6 +531,8 @@ sh sort | grep needle
 
 where sort receives the request body on stdin.
 
+When both a request body and a file input suffix are present, the explicit file suffix feeds the pipeline through implied cat; the request body is used as pipeline input only when no input suffix is present, or when a command explicitly captures it.
+
 Users may define commands specifically for capturing, decoding, or transforming request bodies.
 
 ### 10.7 Commands That Consume URL Expressions
@@ -528,7 +551,7 @@ and explains it.
 
 grep and jq are not executed in this case.
 
-Commands may opt out of normal URL parsing and handle the remaining URL themselves when the command author requires that behavior.
+A command opts out of normal URL parsing by declaring parse-mode raw in its metadata. When the parser resolves such a command, it hands the command the remaining (still-encoded) URL suffix and stops parsing; downstream segments are neither resolved nor executed. A raw-parse command is only meaningful in leftmost command position, since it consumes everything to its right.
 
 ## 11. Browser Interaction Model
 
@@ -600,7 +623,7 @@ Root selection is implementation-dependent and outside this specification.
 
 For each request, the runtime:
 
-1. Parses the URL using ordinary URL rules.
+1. Parses the raw request-target itself using ordinary URL syntax, decomposing it into per-segment paths and query strings. It must not rely on a stock URL library's single path/query split, which would treat everything after the first ? as one opaque query string (see §4.7 and pipeline_parsing.md §6).
 2. Maps the URL path to a candidate filesystem path and/or command expression.
 3. Resolves command segments left-to-right using the command search path.
 4. Uses command metadata and defaults to determine arity, input mode, parse mode, and output behavior.
@@ -731,13 +754,13 @@ If no file/resource/command parse resolves, return:
 
 text 404 Not Found 
 
-### 15.2 Ambiguous Parse
+### 15.2 Invalid Parse
 
-If multiple parses are possible and ambiguity is not resolved by metadata or query strings, return:
+Parsing is deterministic given the filesystem, command path, and metadata (pipeline_parsing.md §2). When command parsing begins but the URL violates arity, query, boundary, or metadata rules, return:
 
 text 400 Bad Request 
 
-The response should include information about the ambiguity.
+The response should include information about why the parse failed.
 
 ### 15.3 Command Exit Status
 
@@ -751,9 +774,9 @@ Some commands, such as grep, may use nonzero exit codes for ordinary domain outc
 
 ### 15.4 stderr
 
-By default, stderr is discarded.
+By default, stderr is not merged into the response body. The runtime may still capture stderr internally so it can be surfaced in error diagnostics (see pipeline_parsing.md §10.3); "discard" refers to the response stream, not to error reporting.
 
-The /& separator may be used instead of / to combine stdout and stderr, analogous to shell |&.
+The /& token (written as a prefix on a command segment; see §8.8) merges a stage's stdout and stderr, analogous to shell |&.
 
 Command metadata may define alternative stderr behavior.
 
@@ -785,21 +808,21 @@ text GET /wc/arbitrary.txt
 
 Approximate shell equivalent:
 
-sh wc arbitrary.txt 
+sh cat arbitrary.txt | wc 
 
 ### 16.3 Query JSON and Search Output
 
 text GET /grep/needle/jq/haystack.json 
 
-Approximate shell equivalent:
+Approximate shell equivalent (given grep has arity 1):
 
-sh jq haystack.json | grep needle 
+sh cat haystack.json | jq | grep needle 
 
 ### 16.4 Count Matching JSON Items
 
-text GET /wc/-l/grep/needle/jq/.items%5B%5D/cat/haystack.json 
+text GET /wc/-l/grep/needle/jq/.items%5B%5D/haystack.json 
 
-Approximate shell equivalent:
+Approximate shell equivalent (given wc, grep, and jq each have arity 1):
 
 sh cat haystack.json | jq '.items[]' | grep needle | wc -l 
 
@@ -807,7 +830,7 @@ sh cat haystack.json | jq '.items[]' | grep needle | wc -l
 
 text GET /grep?pattern=needle&ignore-case=true/jq?filter=.items[]/haystack.json 
 
-Supplies command-specific named arguments.
+Supplies command-specific named arguments. The core argv parameter is arg (pipeline_parsing.md §6.1); pattern/filter/ignore-case are interpreted by the commands themselves.
 
 ### 16.6 Write a File
 
@@ -826,6 +849,8 @@ text POST /sort/output.txt/input.txt
 Approximate shell equivalent:
 
 sh sort input.txt > output.txt 
+
+The redirection semantics here are command-specific (see §9.3); the core parser does not interpret a path segment as an output target.
 
 ### 16.8 Explain a URL
 
@@ -853,16 +878,21 @@ The alias behavior is whatever errors implements.
 
 ## 17. Open Questions
 
-1. Exact line-oriented syntax for command metadata.
+Several questions originally listed here are now resolved by pipeline_parsing.md; see audit.md for the reconciliation.
+
+1. Exact line-oriented syntax for command metadata. (Partially resolved by pipeline_parsing.md §5; quoting, escaping, and comments still open — audit.md Q-table #3.)
 2. Exact line-oriented syntax for exec quoting and matching.
-3. Exact default arity rules for metadata-free commands.
-4. Exact default behavior for POST to ordinary directories or files.
-5. Exact syntax and semantics of /& within valid URL grammar.
-6. Whether directory listing or index.html should take precedence when both are possible.
-7. How synthesized responses should be advertised or discovered.
-8. Whether there should be a conventional command for parse/explain/debug output.
-9. Whether a future spec should define reusable non-command URL fragments.
-10. Whether a future spec should define package-like distribution for command directories.
+3. Exact default behavior for POST to ordinary directories or files.
+4. Whether directory listing or index.html should take precedence when both are possible.
+5. How synthesized responses should be advertised or discovered.
+6. Whether there should be a conventional command for parse/explain/debug output.
+7. Whether a future spec should define reusable non-command URL fragments.
+8. Whether a future spec should define package-like distribution for command directories.
+
+Resolved and removed from this list:
+
+- Default arity for metadata-free commands → arity 0 (pipeline_parsing.md §4).
+- Syntax and semantics of /& → prefix form (pipeline_parsing.md §8 and §8.8 above; see audit.md item G).
 
 ## 18. Minimal Viable Implementation
 
