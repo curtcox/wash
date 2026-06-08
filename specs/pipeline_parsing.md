@@ -1,6 +1,6 @@
 # Addendum: URL Pipeline Parsing and Metadata-Free Command Arity
 
-> This addendum extends runtime.md. Where the two specs interact, earlier reconciliation decisions are recorded in audit.md. Remaining follow-up decisions are recorded in followup_audit.md.
+> This addendum extends runtime.md. Remaining unresolved design issues are tracked in remaining_issues.md.
 
 ## 1. Parsing Problem Statement
 
@@ -734,7 +734,7 @@ Implementations should include tests for the following cases.
 
 ## 15. Resolved Questions
 
-The questions previously open in this section are resolved as follows (see audit.md §Q):
+The questions previously open in this section are resolved as follows:
 
 1. Variable arity: only fixed N and arity * are defined in v1; range forms (arity 0..*, arity 1..3) are reserved for a future extension and are malformed in v1 (§5.2, §5.5).
 2. Reserved query namespace: arg is the only reserved core parameter; argv and all other names are command-specific (§6.1). Core arg is valid only on recognized command segments and disables metadata path arity (§6.2, §6.3).

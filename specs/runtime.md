@@ -1,6 +1,6 @@
 # URL Filesystem Router Runtime Specification
 
-> This core spec is extended by pipeline_parsing.md (URL pipeline parsing and metadata-free arity). Earlier reconciliation decisions are recorded in audit.md; follow-up author decisions are recorded in followup_audit.md.
+> This core spec is extended by pipeline_parsing.md (URL pipeline parsing and metadata-free arity). Remaining unresolved design issues are tracked in remaining_issues.md.
 
 ## 1. Problem Statement
 
@@ -888,7 +888,7 @@ The alias behavior is whatever errors implements.
 
 ## 17. Open Questions
 
-Many questions originally listed here are now resolved by pipeline_parsing.md; see audit.md for the reconciliation.
+Many questions originally listed here are now resolved by pipeline_parsing.md. Remaining unresolved issues are tracked in remaining_issues.md.
 
 Still open:
 
@@ -901,7 +901,7 @@ Still open:
 Resolved and removed from this list:
 
 - Default arity for metadata-free commands → arity 0 (pipeline_parsing.md §4).
-- Syntax and semantics of /& → prefix form (pipeline_parsing.md §8 and §8.8 above; see audit.md item G).
+- Syntax and semantics of /& → prefix form (pipeline_parsing.md §8 and §8.8 above).
 - Command metadata grammar and normative field list → pipeline_parsing.md §5.5, §5.6.
 - Default behavior for POST to ordinary directories or files → 405 unless a command governs the path (§9.3).
 - Directory listing vs. index.html precedence → default file wins, fallback listing (§6.5).
