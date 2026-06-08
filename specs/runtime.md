@@ -1,6 +1,6 @@
 # URL Filesystem Router Runtime Specification
 
-> This core spec is extended by pipeline_parsing.md (URL pipeline parsing and metadata-free arity). Where the two interact, the reconciliation decisions are recorded in audit.md.
+> This core spec is extended by pipeline_parsing.md (URL pipeline parsing and metadata-free arity). Earlier reconciliation decisions are recorded in audit.md; follow-up author decisions are recorded in followup_audit.md.
 
 ## 1. Problem Statement
 
@@ -391,7 +391,7 @@ These may read files, execute commands, and compute output, but must not intenti
 
 ### 9.2 PUT
 
-PUT may create or replace a file resource.
+PUT creates or replaces an ordinary file resource in the core contract unless an implementation policy disables file writes. If disabled by policy, the runtime must reject the request with an appropriate HTTP error such as 403 Forbidden or 405 Method Not Allowed.
 
 Example:
 
@@ -400,8 +400,6 @@ text PUT /file.txt
 writes the request body to:
 
 text root/file.txt 
-
-where supported.
 
 ### 9.3 POST
 
@@ -421,7 +419,7 @@ A POST whose path resolves to an ordinary file or directory with no command gove
 
 ### 9.4 DELETE
 
-DELETE may delete a filesystem resource where supported.
+DELETE deletes an ordinary filesystem resource in the core contract unless an implementation policy disables deletion. If disabled by policy, the runtime must reject the request with an appropriate HTTP error such as 403 Forbidden or 405 Method Not Allowed.
 
 Example:
 
@@ -437,7 +435,9 @@ Implementations may support additional standard HTTP methods such as:
 
 text HEAD PATCH OPTIONS 
 
-Normal HTTP semantics should be preserved. A request method not permitted by a command's methods metadata returns 405 Method Not Allowed. In a multi-stage pipeline, the request method must be permitted by every stage that declares methods metadata.
+Normal HTTP semantics should be preserved. A request method not permitted by a command's methods metadata returns 405 Method Not Allowed. If methods metadata is absent, a command permits GET only. In a multi-stage pipeline, the request method must be permitted by every stage.
+
+GET must not mutate. The metadata-free default is mutates false. A command that mutates must opt into a non-GET method with methods metadata. A metadata file that permits GET and declares mutates true is invalid metadata and returns 500 for requests resolving to that command.
 
 ### 9.6 Refresh Behavior
 
@@ -499,11 +499,11 @@ To express that pipeline, give foo arity 1 (so it consumes bar) via metadata, or
 
 ### 10.4 Invalid Parses
 
-Given the filesystem, command path, and metadata, parsing is deterministic (pipeline_parsing.md §2); there is no genuine multiple-parse ambiguity to resolve. The default response is:
+Given the filesystem, command path, and metadata, parsing is deterministic (pipeline_parsing.md §2); there is no genuine multiple-parse ambiguity to resolve. The default response for client-controlled parse errors is:
 
 text 400 Bad Request 
 
-returned when command parsing begins but the URL violates arity, query, boundary, or metadata rules. The response should include information about why the parse failed.
+returned when command parsing begins but the URL violates arity, query, or boundary rules. Malformed recognized metadata is a server-side configuration error and returns 500. The response should include information about why the parse failed.
 
 ### 10.5 Commands Consuming Multiple Resources
 
@@ -534,6 +534,8 @@ sh sort | grep needle
 where sort receives the request body on stdin.
 
 When both a request body and a file input suffix are present, the explicit file suffix feeds the pipeline through implied cat; the request body is used as pipeline input only when no input suffix is present, or when a command explicitly captures it.
+
+When there is no input suffix and no request body, stdin is closed and empty by default.
 
 Users may define commands specifically for capturing, decoding, or transforming request bodies.
 
@@ -625,8 +627,8 @@ Root selection is implementation-dependent and outside this specification.
 
 For each request, the runtime:
 
-1. Parses the raw request-target itself using ordinary URL syntax, decomposing it into per-segment paths and query strings. It must not rely on a stock URL library's single path/query split, which would treat everything after the first ? as one opaque query string (see §4.7 and pipeline_parsing.md §6).
-2. Maps the URL path to a candidate filesystem path and/or command expression.
+1. Parses the raw request-target itself using ordinary URL syntax, decomposing it into per-segment paths and query strings. A per-command query starts at a raw ? in a segment and ends at the next raw / or the end of the request-target; literal /, ?, &, and = inside query values must be percent-encoded. The runtime must not rely on a stock URL library's single path/query split, which would treat everything after the first ? as one opaque query string (see §4.7 and pipeline_parsing.md §6).
+2. Maps the URL path to a candidate filesystem path and/or command expression. Raw path segments are split before percent-decoding; decoded / and NUL are invalid in ordinary filesystem path segments. Dot segments are normalized for filesystem lookup, and ordinary literal file serving rejects any path that escapes the configured root. Symlink escape behavior is implementation-defined; the default policy should reject symlinks that expose files outside the root for direct file serving.
 3. Resolves command segments left-to-right using the command search path.
 4. Uses command metadata and defaults to determine arity, input mode, parse mode, and output behavior.
 5. Evaluates the rightmost input resource or request body as needed.
@@ -654,6 +656,8 @@ Depending on metadata or defaults, a command may receive:
 7. no input.
 
 For the common pipeline case, commands receive bytes/stdin from the evaluated suffix.
+
+If the common pipeline case has neither an input suffix nor a request body, stdin is closed and empty.
 
 ### 12.5 Command Output
 
@@ -688,6 +692,8 @@ Cross-origin access should be easy to enable.
 Mutating operations are controlled by HTTP method discipline and command-author responsibility.
 
 GET must not mutate.
+
+Commands default to methods GET and mutates false. A command that mutates must declare an appropriate non-GET method. Metadata that allows GET while declaring mutates true is invalid.
 
 No confirmation mechanism is required by the specification for destructive operations.
 
@@ -758,11 +764,13 @@ text 404 Not Found
 
 ### 15.2 Invalid Parse
 
-Parsing is deterministic given the filesystem, command path, and metadata (pipeline_parsing.md §2). When command parsing begins but the URL violates arity, query, boundary, or metadata rules, return:
+Parsing is deterministic given the filesystem, command path, and metadata (pipeline_parsing.md §2). When command parsing begins but the URL violates client-controlled arity, query, or boundary rules, return:
 
 text 400 Bad Request 
 
 The response should include information about why the parse failed.
+
+Malformed recognized metadata returns 500 Internal Server Error because it is a server-side configuration error.
 
 ### 15.3 Command Exit Status
 
@@ -773,6 +781,8 @@ text 400 Bad Request
 This behavior may be overridden through command metadata under env/meta.
 
 Some commands, such as grep, may use nonzero exit codes for ordinary domain outcomes such as “no matches.” Metadata can define how those statuses map to HTTP responses.
+
+In a multi-stage pipeline, every stage's exit status is mapped through its metadata or defaults. If any stage maps to a non-2xx HTTP status, the whole response is an error. If multiple stages fail, the first failing stage in URL order determines the HTTP status and primary diagnostic.
 
 ### 15.4 stderr
 
@@ -841,8 +851,6 @@ sh curl -X PUT --data 'hello' http://localhost:PORT/greeting.txt
 Writes:
 
 text root/greeting.txt 
-
-where supported.
 
 ### 16.7 Run a Mutating Command
 
@@ -915,7 +923,7 @@ Although the specification is not limited to an MVP, a minimal useful implementa
 11. Child process per request.
 12. Basic stdin/stdout command execution.
 13. MIME inference for raw command output.
-14. 400 for ambiguous parses.
+14. 400 for invalid command parses.
 15. 404 for unresolved resources.
 16. 500 for command/interpreter runtime failures.
 17. Cross-origin requests disabled by default.

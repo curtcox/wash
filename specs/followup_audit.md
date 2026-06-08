@@ -1,6 +1,8 @@
-# Follow-up Spec Audit: Remaining Ambiguities and Open Questions
+# Follow-up Spec Audit and Decision Log
 
 Audit date: 2026-06-08
+Implementation status: the author-decision proposals at the end of this document have been applied
+to `runtime.md` and `pipeline_parsing.md`.
 
 Files reviewed:
 
@@ -8,8 +10,9 @@ Files reviewed:
 - `specs/pipeline_parsing.md`
 - `specs/audit.md`
 
-This audit treats `audit.md` as historical reconciliation material and focuses on issues that remain
-ambiguous, inconsistent, or under-specified in the current specs.
+This audit treats `audit.md` as historical reconciliation material. The findings below record the
+follow-up ambiguities found before the author decisions were applied; the active normative rules now
+live in `runtime.md` and `pipeline_parsing.md`.
 
 ## Summary
 
@@ -17,11 +20,11 @@ The major execution-model conflicts from the earlier audit have mostly been reso
 `runtime.md` and `pipeline_parsing.md`: implied `cat`, metadata-free arity 0, short metadata field
 names, and `/&cmd` stderr syntax are now mostly aligned.
 
-The remaining risk is implementer-facing precision. Several rules still leave multiple plausible
-behaviors for the same request, especially around per-segment query parsing, metadata errors,
+The remaining risk was implementer-facing precision. The author decisions at the end of this file
+were applied to close the highest-impact gaps around per-segment query parsing, metadata errors,
 method defaults, request bodies, and pipeline exit status.
 
-## Findings
+## Findings Before Implementation
 
 ### 1. Malformed metadata is both 400 and 500
 
@@ -332,53 +335,56 @@ Proposed resolution: add a header to `audit.md` marking it as historical and poi
 specs plus this follow-up audit, or rewrite it into a closed decision log with each item marked
 `resolved`, `superseded`, or `still open`.
 
-### 16. The MVP section still says "400 for ambiguous parses"
+### 16. The MVP section said "400 for ambiguous parses"
 
 Severity: low
 
 `runtime.md` section 10.4 and `pipeline_parsing.md` frame parsing as deterministic, with 400 for
-invalid parses. But `runtime.md` section 18 still lists "400 for ambiguous parses."
+invalid parses. Before implementation, `runtime.md` section 18 still listed "400 for ambiguous
+parses."
 
-Proposed resolution: change the MVP bullet to "400 for invalid command parses."
+Implemented resolution: changed the MVP bullet to "400 for invalid command parses."
 
-## Open Questions for Author Decision
+## Implemented Author Decisions
+
+The following proposed answers were accepted and applied to `runtime.md` and
+`pipeline_parsing.md`.
 
 1. Should malformed recognized metadata always be 500, with 400 reserved for client parse errors?
-   Proposed answer: yes.
+   Implemented answer: yes.
 
 2. Should core `arg` on a command segment simply disable path arity for that command, making the
    current "mixing query argv and path argv" rule unnecessary?
-   Proposed answer: yes; reject core `arg` on non-command segments.
+   Implemented answer: yes; reject core `arg` on non-command segments.
 
 3. What exact grammar should delimit per-command query strings inside the raw request-target?
-   Proposed answer: a query ends at the next raw `/`; literal `/`, `?`, `&`, and `=` in values must
+   Implemented answer: a query ends at the next raw `/`; literal `/`, `?`, `&`, and `=` in values must
    be percent-encoded.
 
 4. How should exact filesystem resource matching behave when `?` appears in the request-target?
-   Proposed answer: final ordinary resource query may be stripped for direct resources; per-segment
+   Implemented answer: final ordinary resource query may be stripped for direct resources; per-segment
    query syntax should not match literal filenames unless `?` is encoded as `%3F`.
 
 5. What are the default `methods` and `mutates` semantics for metadata-free commands?
-   Proposed answer: metadata-free commands permit GET only; mutating commands must opt into
+   Implemented answer: metadata-free commands permit GET only; mutating commands must opt into
    mutating methods, and GET must be rejected for mutating commands.
 
 6. Is PUT/DELETE for ordinary files required in v1, or can implementations disable it and still
    conform?
-   Proposed answer: required by the core contract unless disabled by an explicit implementation
+   Implemented answer: required by the core contract unless disabled by an explicit implementation
    policy.
 
 7. What is the HTTP status aggregation rule for multi-stage pipelines?
-   Proposed answer: pipefail-like; any stage mapped to a non-2xx status fails the response, with a
+   Implemented answer: pipefail-like; any stage mapped to a non-2xx status fails the response, with a
    documented tie-breaker.
 
 8. What happens when a command has stdin input mode but there is no suffix and no request body?
-   Proposed answer: stdin is closed and empty.
+   Implemented answer: stdin is closed and empty.
 
 9. Are symlinks under the root allowed to expose files outside the root for direct file serving?
-   Proposed answer: implementation-defined, but the default should be to reject escapes for literal
+   Implemented answer: implementation-defined, but the default should be to reject escapes for literal
    file serving.
 
 10. Should `audit.md` remain historical, or should it be rewritten into a live decision log?
-    Proposed answer: mark it historical and keep future live issues in a separate audit or issue
+    Implemented answer: mark it historical and keep future live issues in a separate audit or issue
     tracker.
-

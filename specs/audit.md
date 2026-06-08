@@ -1,5 +1,10 @@
 # Spec Audit: Ambiguities, Inconsistencies, and Open Questions
 
+> Historical note: this audit records the initial reconciliation pass. The active normative rules are
+> in `runtime.md` and `pipeline_parsing.md`; follow-up decisions from 2026-06-08 are tracked in
+> `followup_audit.md`. Items below may describe issues that have since been resolved in the active
+> specs.
+
 Audit date: 2026-06-08
 Documents reviewed:
 - `specs/runtime.md` — *URL Filesystem Router Runtime Specification* (core spec)

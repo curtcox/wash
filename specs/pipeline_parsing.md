@@ -1,6 +1,6 @@
 # Addendum: URL Pipeline Parsing and Metadata-Free Command Arity
 
-> This addendum extends runtime.md. Where the two specs interact, the reconciliation decisions are recorded in audit.md.
+> This addendum extends runtime.md. Where the two specs interact, earlier reconciliation decisions are recorded in audit.md. Remaining follow-up decisions are recorded in followup_audit.md.
 
 ## 1. Parsing Problem Statement
 
@@ -20,10 +20,10 @@ The primary ambiguity resolved by this addendum is how to parse URL pipelines wh
 
 ## 2. Normative Parse Algorithm
 
-Given an HTTP request path:
+Given an HTTP request-target:
 
-1. Decode URL path segments according to normal URL path decoding rules.
-2. Check whether the request path resolves to an exact filesystem resource.
+1. Split the raw request-target on raw / before percent-decoding. Per-command query strings are delimited by the next raw / or the end of the request-target (§6). A literal /, ?, &, or = inside a query value must be percent-encoded.
+2. Check whether the request path resolves to an exact filesystem resource (§9.1).
    - If yes, the exact filesystem resource wins.
    - No command parsing is attempted for that path.
 3. If no exact filesystem resource exists, attempt command parsing from the leftmost segment.
@@ -33,14 +33,19 @@ Given an HTTP request path:
    - Resolve the command name through the command PATH.
    - Load metadata from root/env/meta/<command> if present.
    - If metadata is absent, use metadata-free defaults.
+   - If resolved metadata contains a malformed recognized field, return 500 Internal Server Error (§5.5, §10.4).
+   - If metadata declares parse-mode raw, pass the remaining raw suffix to that command and stop parsing (§5.7).
    - Determine argv from either query arguments or path arguments.
-   - Query argv overrides metadata path arity.
-   - Mixing query argv and path argv for the same command is invalid.
+   - Core query argv is valid only on a recognized command segment.
+   - Query argv disables metadata path arity for that command; following segments are parsed as pipeline/input suffix, not as argv.
 7. Continue scanning the remaining suffix for known command segments.
    - Known command segments inside a suffix create pipeline stages.
    - Each recognized command divides the URL into another stage.
 8. The final rightmost non-command suffix is supplied as input through an implied cat.
-9. If command parsing starts but the URL violates arity, query, boundary, or metadata rules, return 400 Bad Request.
+   - If there is no input suffix but the request has a body, the body feeds the rightmost stage's stdin.
+   - If there is neither input suffix nor request body, stdin is closed and empty by default.
+   - If both an input suffix and request body are present, the suffix wins unless command metadata explicitly captures the body.
+9. If command parsing starts but the URL violates client-controlled arity, query, or pipeline boundary rules, return 400 Bad Request.
 10. If no resource exists and no command parse can start, return 404 Not Found.
 
 ## 3. Command Resolution Rules
@@ -71,13 +76,15 @@ If /grep/docs/file.txt exists as a filesystem path, it is served as a file and d
 
 A command with no metadata has:
 
-text arity 0 input stdin 
+text arity 0 input stdin output stdout methods GET mutates false 
 
 This means a metadata-free command consumes zero path arguments. Remaining suffix segments are not treated as argv for that command.
 
 If the remaining suffix contains known command names, those command names create further pipeline stages.
 
 If the rightmost remaining suffix resolves as a file or directory path, it is supplied to the pipeline through an implied cat.
+
+If no input suffix exists and the HTTP request has no body, stdin is closed and empty. A command that requires an input resource must declare and enforce that requirement through metadata or command behavior.
 
 Example:
 
@@ -185,6 +192,8 @@ Example:
 
 text exit 0=200 1=404 *=400 
 
+In a multi-stage pipeline, every stage's exit status is mapped through that stage's metadata or defaults. If any stage maps to a non-2xx HTTP status, the overall response is an error. When multiple stages map to non-2xx statuses, the first failing stage in URL order wins. This is intentionally pipefail-like: an upstream stage failure cannot be hidden by a downstream stage that exits successfully.
+
 ### 5.5 Metadata Grammar
 
 The metadata file is line-oriented:
@@ -205,9 +214,52 @@ text arity input output methods mime mutates parse-mode stderr exit
 
 All fields are optional; defaults apply for any absent field (§4).
 
+### 5.7 Methods, Mutation, and Parse Mode
+
+The default allowed method for a command is:
+
+text methods GET 
+
+The methods field is a whitespace-separated list of HTTP methods. Method names are case-sensitive
+and use their standard uppercase spelling, for example:
+
+text methods GET POST 
+
+A request method not permitted by a command's methods metadata returns 405 Method Not Allowed. In a
+multi-stage pipeline, every stage must permit the request method.
+
+The mutates field is boolean:
+
+text mutates true mutates false 
+
+The default is:
+
+text mutates false 
+
+GET must not mutate. A metadata file that permits GET and declares mutates true is invalid metadata
+and returns 500 for requests resolving to that command. For non-GET mutating commands, the command
+must opt into the relevant method with methods metadata.
+
+The parse-mode field defaults to:
+
+text parse-mode normal 
+
+The only additional v1 parse mode is:
+
+text parse-mode raw 
+
+When a resolved command declares parse-mode raw, the runtime passes the remaining still-encoded URL
+suffix to that command and stops pipeline parsing. A raw-parse command is only valid in leftmost
+command position; elsewhere it is invalid metadata for that request and returns 500.
+
 ## 6. Query String Attachment Rules
 
 Query strings attach to the command segment on which they appear.
+
+The runtime parses per-command query strings from the raw request-target. A command query starts at
+the first raw ? in a segment and ends at the next raw / or the end of the request-target. Query
+parsing happens before percent-decoding values. Literal /, ?, &, and = inside query values must be
+percent-encoded.
 
 Example:
 
@@ -253,21 +305,21 @@ sh cat file.txt | grep -i needle
 
 In v1, arg is the only reserved core query parameter. All other parameter names — including argv — are command-specific and are not interpreted by the core parser.
 
-### 6.2 Query Argv Overrides Metadata Arity
+### 6.2 Query Argv Disables Metadata Arity
 
-If query argv is present for a command, it overrides metadata path arity for that command.
+If query argv is present for a command, it disables metadata path arity for that command.
 
-Metadata arity specifies how many path elements to consume as command arguments only when query argv is not used.
+Metadata arity specifies how many path elements to consume as command arguments only when query argv is not used. When query argv is used, the command consumes zero path arguments and following segments are parsed as pipeline stages or input suffix.
 
-### 6.3 Mixing Query Argv and Path Argv
+### 6.3 Core Arg on Non-command Segments
 
-Mixing query argv and path argv for the same command is invalid.
+Core arg is valid only on a recognized command segment.
 
 Example:
 
 text /grep/-i?arg=needle/file.txt 
 
-is invalid because -i is a path argument while arg=needle is a query argument for the same command.
+is invalid because -i is not a recognized command segment in this parse, so arg cannot attach to it as core argv.
 
 The runtime should return 400 Bad Request.
 
@@ -359,6 +411,18 @@ A literal command name that begins with & is discouraged. To address such a comm
 
 If the complete request path resolves to an exact filesystem path, that path wins before command parsing.
 
+Exact filesystem matching is performed after splitting the raw request-target on raw / and before
+interpreting any per-segment query syntax as command syntax. A final ordinary resource query may be
+stripped for direct file or directory requests, so /file.txt?download=1 may resolve to /file.txt.
+Per-segment query syntax inside the path expression prevents exact filesystem matching unless the
+literal ? is percent-encoded as %3F.
+
+For filesystem lookup, raw path segments are split before percent-decoding. Decoded / and NUL are
+invalid in ordinary filesystem path segments. Dot segments are normalized for filesystem lookup, and
+ordinary literal file serving must reject any path that escapes the configured root. Symlink escape
+behavior is implementation-defined; the default policy should reject symlinks that expose files
+outside the root for direct file serving.
+
 Example:
 
 text /bin/wc 
@@ -429,7 +493,7 @@ A runtime may optionally emit a diagnostic header indicating that a synthesized 
 
 ### 10.1 400 Bad Request
 
-Return 400 Bad Request when command parsing starts but the URL is invalid for command metadata, query rules, arity rules, pipeline rules, or default metadata-free behavior.
+Return 400 Bad Request when command parsing starts but the URL is invalid for client-controlled query rules, arity rules, pipeline rules, or default metadata-free behavior.
 
 Examples include:
 
@@ -439,7 +503,7 @@ when wc is metadata-free.
 
 text /grep/-i?arg=needle/file.txt 
 
-because query argv and path argv are mixed for the same command.
+because core arg appears on a non-command segment.
 
 Exact error-message text is not normative.
 
@@ -467,6 +531,10 @@ returns 404 if no such resource exists and not-found is not a command.
 Default mapping:
 
 text exit 0 => HTTP 200 exit nonzero => HTTP 400 
+
+In a multi-stage pipeline, every stage's exit status is mapped independently. If any mapped status is
+non-2xx, the whole response is an error. When multiple stages fail, the first failing stage in URL
+order determines the HTTP status and primary diagnostic.
 
 For nonzero command exits, the response may include:
 
@@ -586,13 +654,13 @@ Correct metadata-free form:
 
 text /wc?arg=-l/grep?arg=needle/jq?arg=.items%5B%5D/haystack.json 
 
-### 13.3 Mixing Query Argv and Path Argv Is Invalid
+### 13.3 Core Arg on a Non-command Segment Is Invalid
 
 text /grep/-i?arg=needle/file.txt 
 
-returns 400 Bad Request.
+returns 400 Bad Request because -i is not a recognized command segment in this parse.
 
-Use one style:
+Use one of these forms instead:
 
 text /grep/-i/needle/file.txt 
 
@@ -638,8 +706,9 @@ Implementations should include tests for the following cases.
 
 - ?arg=value
 - repeated ?arg=...&arg=...
-- query argv overrides metadata path arity.
-- mixing query argv and path argv returns 400.
+- query argv disables metadata path arity.
+- core arg on a non-command segment returns 400.
+- literal /, ?, &, and = inside query values must be percent-encoded.
 
 ### 14.5 Pipeline Boundaries
 
@@ -653,6 +722,8 @@ Implementations should include tests for the following cases.
 - no resource and no command parse returns 404.
 - command parse starts but arity fails returns 400.
 - nonzero command exit defaults to 400.
+- malformed recognized metadata returns 500.
+- multi-stage pipeline status uses pipefail-like aggregation.
 - content negotiation controls error response format.
 
 ### 14.7 Synthesized Resources
@@ -666,7 +737,7 @@ Implementations should include tests for the following cases.
 The questions previously open in this section are resolved as follows (see audit.md §Q):
 
 1. Variable arity: only fixed N and arity * are defined in v1; range forms (arity 0..*, arity 1..3) are reserved for a future extension and are malformed in v1 (§5.2, §5.5).
-2. Reserved query namespace: arg is the only reserved core parameter; argv and all other names are command-specific (§6.1).
+2. Reserved query namespace: arg is the only reserved core parameter; argv and all other names are command-specific (§6.1). Core arg is valid only on recognized command segments and disables metadata path arity (§6.2, §6.3).
 3. Metadata grammar: # line comments, whitespace-separated tokens, last-occurrence-wins for duplicates, unknown fields ignored, malformed values → 500 (§5.5).
 4. Normative metadata field list: arity, input, output, methods, mime, mutates, parse-mode, stderr, exit (§5.6).
 5. Malformed metadata → 500 (§5.5, §10.4).
@@ -675,3 +746,8 @@ The questions previously open in this section are resolved as follows (see audit
 8. Command names beginning with &: discouraged; percent-encode the leading & as %26 (§8.1).
 9. Synthesized resource that lost to a command parse: may be reported via an optional diagnostic header; not required (§9.5).
 10. Execution metadata headers: standardized as X-WebShell-Command, X-WebShell-Pipeline, X-WebShell-Source (§11).
+11. Per-command query strings end at the next raw /; literal /, ?, &, and = in query values must be percent-encoded (§6).
+12. Metadata-free commands permit GET only and default to mutates false (§5.7).
+13. No suffix and no request body means stdin is closed and empty (§4).
+14. Multi-stage pipeline exit status is pipefail-like; the first failing stage in URL order wins (§5.4, §10.3).
+15. Symlink escapes for direct file serving are implementation-defined; the default policy should reject them (§9.1).
