@@ -1,6 +1,6 @@
 # Addendum: URL Pipeline Parsing and Metadata-Free Command Arity
 
-> This addendum extends runtime.md. Remaining unresolved design issues are tracked in remaining_issues.md.
+> This addendum extends runtime.md.
 
 ## 1. Parsing Problem Statement
 
@@ -45,7 +45,7 @@ Given an HTTP request-target:
    - If there is no input suffix but the request has a body, the body feeds the rightmost stage's stdin.
    - If there is neither input suffix nor request body, stdin is closed and empty by default.
    - If both an input suffix and request body are present, the suffix wins unless command metadata explicitly captures the body.
-9. If command parsing starts but the URL violates client-controlled arity, query, or pipeline boundary rules, return 400 Bad Request.
+9. If command parsing starts but the URL violates client-controlled arity, query, or pipeline boundary rules, return 400 Bad Request. A 400 from a started command parse is terminal: the runtime does not fall back to a synthesized resource (§9.5).
 10. If no resource exists and no command parse can start, return 404 Not Found.
 
 ## 3. Command Resolution Rules
@@ -82,7 +82,7 @@ This means a metadata-free command consumes zero path arguments. Remaining suffi
 
 If the remaining suffix contains known command names, those command names create further pipeline stages.
 
-If the rightmost remaining suffix resolves as a file or directory path, it is supplied to the pipeline through an implied cat.
+If the rightmost remaining suffix resolves as a file or directory path, it is supplied to the pipeline through an implied cat. The implied cat is a runtime primitive that reads filesystem bytes for the suffix; it is not resolved through the command PATH, carries no metadata, and imposes no method restriction of its own (the method gate is enforced by the real command stages, §5.7). A user-defined cat command on the PATH does not affect implied-cat behavior.
 
 If no input suffix exists and the HTTP request has no body, stdin is closed and empty. A command that requires an input resource must declare and enforce that requirement through metadata or command behavior.
 
@@ -140,6 +140,11 @@ If grep has arity 1, this parses as:
 
 sh cat file.txt | grep needle 
 
+Argument segments are percent-decoded after the raw / split and passed to the command verbatim as
+strings. Because an argument is never used for filesystem lookup, it may contain bytes that are illegal
+in ordinary filesystem path segments, including a decoded / or NUL. For example /grep/a%2Fb/file.txt
+with grep arity 1 passes the single argument a/b.
+
 ### 5.2 Variable Arity
 
 Metadata may support variable arity.
@@ -148,7 +153,7 @@ At minimum, the following form is supported:
 
 text arity * 
 
-arity * means the command consumes the rest of the URL as argv, leaving no input suffix and no downstream pipeline.
+arity * means the command consumes the rest of the URL as argv, leaving no input suffix and no downstream pipeline. Suppressing the URL-derived input suffix does not suppress a request body: if the method is permitted and a request body is present, that body still feeds the command's stdin (§4, §10.6 of runtime.md).
 
 Example:
 
@@ -192,7 +197,11 @@ Example:
 
 text exit 0=200 1=404 *=400 
 
+The exit field value is a whitespace-separated list of code=status pairs. code is a non-negative integer or the wildcard *; status is an HTTP status code. An explicit numeric code takes precedence over *. A nonzero exit that matches no explicit code and has no * pair falls back to the default mapping (nonzero => 400). A malformed pair is a malformed recognized value and returns 500 (§5.5).
+
 In a multi-stage pipeline, every stage's exit status is mapped through that stage's metadata or defaults. If any stage maps to a non-2xx HTTP status, the overall response is an error. When multiple stages map to non-2xx statuses, the first failing stage in URL order wins. This is intentionally pipefail-like: an upstream stage failure cannot be hidden by a downstream stage that exits successfully.
+
+Because URL order is reversed relative to data-flow (shell) order, the first failing stage in URL order is the most downstream stage in the pipeline, matching shell set -o pipefail. For example, given the URL /wc/grep/jq/haystack.json (data flow cat haystack.json | jq | grep | wc), if both jq and wc exit nonzero, wc — first in URL order — determines the HTTP status and primary diagnostic.
 
 ### 5.5 Metadata Grammar
 
@@ -251,6 +260,35 @@ text parse-mode raw
 When a resolved command declares parse-mode raw, the runtime passes the remaining still-encoded URL
 suffix to that command and stops pipeline parsing. A raw-parse command is only valid in leftmost
 command position; elsewhere it is invalid metadata for that request and returns 500.
+
+### 5.8 MIME
+
+The mime field is a single media type string applied to the command's output when that command is the
+final (leftmost in URL order) stage:
+
+text mime application/json 
+
+It sets the response Content-Type. The mime field is ignored for non-final stages, and is overridden
+when a command emits a full HTTP response that sets its own Content-Type (§12.5 of runtime.md). When no
+mime field is present, the MIME type is inferred heuristically. A malformed mime value is a malformed
+recognized value and returns 500 (§5.5).
+
+### 5.9 Stderr
+
+The stderr field controls how a stage's standard error is handled. The default is:
+
+text stderr discard 
+
+The two v1 values are:
+
+text stderr discard stderr merge 
+
+stderr discard keeps standard error out of the response body for that stage. The runtime may still
+capture stderr internally for error diagnostics (§10.3); discard refers to the response stream, not to
+internal error reporting. stderr merge folds that stage's standard error into its standard output, the
+metadata-level equivalent of marking that stage's output boundary with the /& URL token (§8). When both
+a stderr merge field and a /& prefix apply to the same boundary, the effect is the same single merge.
+Any other stderr value is a malformed recognized value and returns 500 (§5.5).
 
 ## 6. Query String Attachment Rules
 
@@ -403,7 +441,9 @@ The & prefixes grep and marks the grep→wc boundary (grep's output flowing into
 
 ### 8.1 Command Names Beginning With &
 
-A literal command name that begins with & is discouraged. To address such a command, percent-encode the leading & as %26 so it is not parsed as a stderr-merge prefix.
+The /& prefix is detected on the raw segment before percent-decoding: the runtime tests for a raw leading & on the segment, strips it if present, and then percent-decodes the remainder to obtain the command name used for PATH lookup.
+
+A literal command name that begins with & is therefore discouraged. To address such a command, percent-encode the leading & as %26 so it is decoded to a name character rather than parsed as a stderr-merge prefix.
 
 ## 9. File, Directory, Command, and Synthesized Resource Precedence
 
@@ -412,16 +452,24 @@ A literal command name that begins with & is discouraged. To address such a comm
 If the complete request path resolves to an exact filesystem path, that path wins before command parsing.
 
 Exact filesystem matching is performed after splitting the raw request-target on raw / and before
-interpreting any per-segment query syntax as command syntax. A final ordinary resource query may be
-stripped for direct file or directory requests, so /file.txt?download=1 may resolve to /file.txt.
-Per-segment query syntax inside the path expression prevents exact filesystem matching unless the
-literal ? is percent-encoded as %3F.
+interpreting any per-segment query syntax as command syntax.
+
+A raw ? is an ordinary-resource query only when it appears in the final path segment with no raw /
+after it. In that case the runtime first strips the query and attempts the exact filesystem match
+against the path without it, so /file.txt?download=1 may resolve to /file.txt. Only if that match
+misses is the segment reinterpreted as a command carrying a per-command query (§6). A raw ? that has
+any raw / after it is always per-command query syntax and prevents exact filesystem matching; to match
+a literal ? as part of a filesystem name, percent-encode it as %3F.
 
 For filesystem lookup, raw path segments are split before percent-decoding. Decoded / and NUL are
 invalid in ordinary filesystem path segments. Dot segments are normalized for filesystem lookup, and
 ordinary literal file serving must reject any path that escapes the configured root. Symlink escape
 behavior is implementation-defined; the default policy should reject symlinks that expose files
 outside the root for direct file serving.
+
+Leading, trailing, and repeated raw / are collapsed before parsing, so an empty path segment is never
+a valid command or argument segment. A trailing slash is not significant: /dir/ and /dir resolve to the
+same resource, and /wc/ parses identically to /wc.
 
 Example:
 
@@ -484,6 +532,8 @@ Precedence:
 1. Exact filesystem resource wins first.
 2. Command parse wins over synthesized resource.
 3. Synthesized resource may resolve if no exact filesystem resource exists and command parsing does not apply or does not win.
+
+A synthesized resource is consulted only when no command parse starts (the leftmost segment is not a command). If a command parse starts and then fails, the result is 400 and is terminal (§2 step 9); the runtime does not fall back to a synthesized resource. "Does not win" therefore covers a command parse that never starts, not one that started and errored.
 
 Therefore, if /docs/index is synthesized and /docs/index can also parse as a command pipeline, the command parse wins over the synthesized resource.
 
@@ -751,5 +801,14 @@ The questions previously open in this section are resolved as follows:
 11. Per-command query strings end at the next raw /; literal /, ?, &, and = in query values must be percent-encoded (§6).
 12. Metadata-free commands permit GET only and default to mutates false (§5.7).
 13. No suffix and no request body means stdin is closed and empty (§4).
-14. Multi-stage pipeline exit status is pipefail-like; the first failing stage in URL order wins (§5.4, §10.3).
+14. Multi-stage pipeline exit status is pipefail-like; the first failing stage in URL order (the most downstream stage) wins (§5.4, §10.3).
 15. Symlink escapes for direct file serving are implementation-defined; the default policy should reject them (§9.1).
+16. stderr field values: discard (default) and merge; any other value is malformed and returns 500 (§5.9).
+17. mime field: a single media type that sets the final stage's Content-Type; malformed values return 500 (§5.8).
+18. exit field grammar: whitespace-separated code=status pairs, code a non-negative integer or *, explicit code beating * (§5.4).
+19. Trailing ? in the final segment is an ordinary-resource query (filesystem match attempted first); a ? followed by any raw / is per-command syntax (§9.1).
+20. A 400 from a started command parse is terminal and does not fall back to a synthesized resource (§2, §9.5).
+21. Argument segments are percent-decoded and passed verbatim; they may contain bytes illegal in filesystem segments, including a decoded / (§5.1).
+22. Leading, trailing, and repeated / are collapsed; an empty segment is never a valid command or argument, and a trailing slash is not significant (§9.1).
+23. The implied cat is a runtime primitive, not resolved through PATH and carrying no metadata or method restriction (§4).
+24. The /& prefix is detected on the raw segment before percent-decoding the command name (§8.1).

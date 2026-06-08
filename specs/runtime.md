@@ -1,6 +1,6 @@
 # URL Filesystem Router Runtime Specification
 
-> This core spec is extended by pipeline_parsing.md (URL pipeline parsing and metadata-free arity). Remaining unresolved design issues are tracked in remaining_issues.md.
+> This core spec is extended by pipeline_parsing.md (URL pipeline parsing and metadata-free arity).
 
 ## 1. Problem Statement
 
@@ -405,6 +405,8 @@ These may read files, execute commands, and compute output, but must not intenti
 
 PUT creates or replaces an ordinary file resource in the core contract unless an implementation policy disables file writes. If disabled by policy, the runtime must reject the request with an appropriate HTTP error such as 403 Forbidden or 405 Method Not Allowed.
 
+PUT targets the literal filesystem path only; it does not trigger command parsing or the command-shadowing ladder of §6.2. Writing the computed output of a pipeline is not meaningful, so PUT /wc/file.txt writes the literal file root/wc/file.txt (creating parent directories per implementation policy) rather than resolving wc as a command. The same applies to DELETE (§9.4).
+
 Example:
 
 text PUT /file.txt 
@@ -433,6 +435,8 @@ A POST whose path resolves to an ordinary file or directory with no command gove
 
 DELETE deletes an ordinary filesystem resource in the core contract unless an implementation policy disables deletion. If disabled by policy, the runtime must reject the request with an appropriate HTTP error such as 403 Forbidden or 405 Method Not Allowed.
 
+Like PUT (§9.2), DELETE targets the literal filesystem path only and does not trigger command parsing.
+
 Example:
 
 text DELETE /file.txt 
@@ -448,6 +452,8 @@ Implementations may support additional standard HTTP methods such as:
 text HEAD PATCH OPTIONS 
 
 Normal HTTP semantics should be preserved. A request method not permitted by a command's methods metadata returns 405 Method Not Allowed. If methods metadata is absent, a command permits GET only. In a multi-stage pipeline, the request method must be permitted by every stage.
+
+A command that permits GET also answers HEAD: the response is computed as for GET and the body is omitted. HEAD is suppressed only by listing methods that include GET but exclude HEAD. OPTIONS handling, including CORS preflight responses, is implementation-defined in v1 and is not governed by per-command methods metadata; see §13.1 for the cross-origin default.
 
 GET must not mutate. The metadata-free default is mutates false. A command that mutates must opt into a non-GET method with methods metadata. A metadata file that permits GET and declares mutates true is invalid metadata and returns 500 for requests resolving to that command.
 
@@ -529,7 +535,7 @@ may mean:
 
 sh diff a.txt b.txt 
 
-if diff is defined with suitable arity/input behavior.
+if diff is given arity 2. This works through arity alone: a.txt and b.txt are passed as literal argv strings, and because the default working directory is the root (§12.3), diff opens them itself as root-relative paths. No non-stdin input mode is involved; in v1 the input metadata field selects only stdin (pipeline_parsing.md §5.3).
 
 ### 10.6 Request Body Input
 
@@ -671,6 +677,8 @@ Depending on metadata or defaults, a command may receive:
 6. URL suffix text,
 7. no input.
 
+This list describes what a command may consume through its argv, working directory, request body, and parse mode — not modes selectable through the input metadata field. In v1 the input field selects only stdin (pipeline_parsing.md §5.3): filesystem paths reach a command as literal argv strings interpreted relative to the root (§12.3), URL suffix text reaches a parse-mode raw command (§10.7), and request body bytes arrive on stdin per §10.6.
+
 For the common pipeline case, commands receive bytes/stdin from the evaluated suffix.
 
 If the common pipeline case has neither an input suffix nor a request body, stdin is closed and empty.
@@ -679,7 +687,7 @@ If the common pipeline case has neither an input suffix nor a request body, stdi
 
 A command may return:
 
-1. raw bytes plus inferred or specified MIME type,
+1. raw bytes plus inferred or specified MIME type (specified via the mime metadata field; pipeline_parsing.md §5.8),
 2. a full HTTP response,
 3. structured metadata,
 4. a generated filesystem artifact,
@@ -808,7 +816,7 @@ By default, stderr is not merged into the response body. The runtime may still c
 
 The /& token (written as a prefix on a command segment; see §8.8) merges a stage's stdout and stderr, analogous to shell |&.
 
-Command metadata may define alternative stderr behavior.
+Command metadata may define alternative stderr behavior through the stderr field, whose v1 values are discard (the default) and merge (pipeline_parsing.md §5.9). stderr merge is the metadata-level equivalent of a /& prefix on that stage's output boundary.
 
 ### 15.5 Interpreter Resolution Failure
 
@@ -920,6 +928,10 @@ Many questions originally listed here are now resolved by pipeline_parsing.md or
 - Non-command reusable URL fragments → outside v1 (§14.1).
 - Package-like command-directory distribution → outside the core specification (§14).
 - Synthesized-resource discovery and scope → pipeline_parsing.md §9.5.
+- PUT and DELETE target the literal filesystem path only and do not trigger command parsing (§9.2, §9.4).
+- A command permitting GET also answers HEAD; OPTIONS/CORS preflight is implementation-defined in v1 (§9.5).
+- The input metadata field selects only stdin in v1; multi-file commands such as diff work through arity plus root-relative argv (§10.5, §12.4).
+- stderr field (discard/merge) and mime field semantics → pipeline_parsing.md §5.9 and §5.8.
 
 ## 18. Minimal Viable Implementation
 
