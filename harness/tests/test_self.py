@@ -5,11 +5,11 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
-from conformance.pytest_plugin import (
-    test_httpclient_self_test,
-    test_validate_roots_corpus,
-    test_validate_vectors_schema,
-)
+from conformance import pytest_plugin as _pytest_plugin
+
+test_httpclient_self_test = _pytest_plugin.test_httpclient_self_test
+test_validate_roots_corpus = _pytest_plugin.test_validate_roots_corpus
+test_validate_vectors_schema = _pytest_plugin.test_validate_vectors_schema
 
 
 def test_conformance_package_does_not_import_reference_wash() -> None:

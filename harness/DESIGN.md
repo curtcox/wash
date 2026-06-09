@@ -1,4 +1,4 @@
-# wash Conformance Harness — Plan
+# wash Conformance Harness Design
 
 > A language-neutral evaluation harness for `wash` (Web Shell) implementations.
 > It launches any implementation against a corpus of root directories, drives it
@@ -48,7 +48,7 @@ rationale; do not use it as the canonical command list.
 
 ```
 harness/
-  PLAN.md                  # this document
+  DESIGN.md                # this document
   pyproject.toml           # Python package + pytest entry points
   conformance/             # the harness itself (Python)
     runner.py              # orchestrates: pick impl × root, launch, run, collect

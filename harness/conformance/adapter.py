@@ -16,7 +16,7 @@ from typing import Any
 try:
     import tomllib
 except ModuleNotFoundError:
-    import tomli as tomllib  # type: ignore[no-redef]
+    import tomli as tomllib  # type: ignore[import-not-found,no-redef]
 
 from conformance.capabilities import load_manifest, origin_host
 from conformance.httpclient import send
@@ -118,10 +118,14 @@ def _start_capture(server: LaunchedServer) -> None:
 
     def run() -> None:
         t1 = threading.Thread(
-            target=reader, args=(server.process.stdout, server.stdout_lines), daemon=True
+            target=reader,
+            args=(server.process.stdout, server.stdout_lines),
+            daemon=True,
         )
         t2 = threading.Thread(
-            target=reader, args=(server.process.stderr, server.stderr_lines), daemon=True
+            target=reader,
+            args=(server.process.stderr, server.stderr_lines),
+            daemon=True,
         )
         t1.start()
         t2.start()
@@ -183,7 +187,9 @@ def launch(
         _start_capture(server)
 
         if adapter.port_mode == "ephemeral":
-            actual_port = _read_ephemeral_port(server, timeout=adapter.ready_timeout_sec)
+            actual_port = _read_ephemeral_port(
+                server, timeout=adapter.ready_timeout_sec
+            )
             if actual_port is None:
                 shutdown(server)
                 captured = server.captured_output()

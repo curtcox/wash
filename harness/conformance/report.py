@@ -77,7 +77,11 @@ class RunReport:
                 return True
             if rec.tier == "MUST" and rec.outcome == Outcome.UNTESTED:
                 return True
-            if strict and rec.tier == "SHOULD" and rec.outcome in {Outcome.FAIL, Outcome.WARN}:
+            if (
+                strict
+                and rec.tier == "SHOULD"
+                and rec.outcome in {Outcome.FAIL, Outcome.WARN}
+            ):
                 return True
         return False
 
@@ -141,7 +145,9 @@ def write_junit(report: RunReport, path: str | Path) -> None:
             ET.SubElement(case, "skipped", message=f"UNTESTED: {rec.reason}")
         elif rec.outcome in {Outcome.LAUNCH_FAILURE, Outcome.PROCESS_DIED}:
             err = ET.SubElement(case, "error", message=rec.outcome.value)
-            err.text = rec.reason + ("\n" + rec.child_output if rec.child_output else "")
+            err.text = rec.reason + (
+                "\n" + rec.child_output if rec.child_output else ""
+            )
         elif rec.outcome == Outcome.TIMEOUT:
             ET.SubElement(case, "error", message="TIMEOUT", type=rec.reason)
         elif rec.outcome == Outcome.WARN:
@@ -184,7 +190,13 @@ def write_human(report: RunReport, *, max_failures: int = 20) -> str:
             r
             for r in report.records
             if r.impl == impl
-            and r.outcome in {Outcome.FAIL, Outcome.WARN, Outcome.LAUNCH_FAILURE, Outcome.PROCESS_DIED}
+            and r.outcome
+            in {
+                Outcome.FAIL,
+                Outcome.WARN,
+                Outcome.LAUNCH_FAILURE,
+                Outcome.PROCESS_DIED,
+            }
         ][:max_failures]
         for rec in failures:
             clause_txt = ", ".join(rec.clauses)
@@ -215,7 +227,10 @@ def write_matrix(report: RunReport, path: str | Path) -> None:
             return "✗"
         if any(r.outcome == Outcome.UNTESTED for r in recs):
             return "U"
-        if all(r.outcome in {Outcome.PASS, Outcome.SKIP, Outcome.WARN, Outcome.TIMEOUT} for r in recs):
+        if all(
+            r.outcome in {Outcome.PASS, Outcome.SKIP, Outcome.WARN, Outcome.TIMEOUT}
+            for r in recs
+        ):
             if any(r.outcome == Outcome.WARN for r in recs):
                 return "~"
             if any(r.outcome == Outcome.SKIP for r in recs):
@@ -229,7 +244,11 @@ def write_matrix(report: RunReport, path: str | Path) -> None:
     for clause in clauses:
         meta = CLAUSE_REGISTRY.get(clause)
         label = meta.source if meta else clause
-        rows.append(f"| {clause} ({label}) | " + " | ".join(cell(i, clause) for i in impls) + " |")
+        rows.append(
+            f"| {clause} ({label}) | "
+            + " | ".join(cell(i, clause) for i in impls)
+            + " |"
+        )
     path.write_text("\n".join(rows) + "\n", encoding="utf-8")
 
 
@@ -252,7 +271,11 @@ def coverage_report(vector_clauses: dict[str, list[str]]) -> dict[str, Any]:
         "must_missing_vectors": must_missing,
         "must_coverage_pct": round(
             100.0
-            * sum(1 for c in CLAUSE_REGISTRY.values() if c.tier == "MUST" and covered[c.id] > 0)
+            * sum(
+                1
+                for c in CLAUSE_REGISTRY.values()
+                if c.tier == "MUST" and covered[c.id] > 0
+            )
             / max(1, sum(1 for c in CLAUSE_REGISTRY.values() if c.tier == "MUST")),
             1,
         ),

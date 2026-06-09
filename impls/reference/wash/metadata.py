@@ -7,17 +7,19 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal
 
-RECOGNIZED_FIELDS = frozenset({
-    "arity",
-    "input",
-    "output",
-    "methods",
-    "mime",
-    "mutates",
-    "parse-mode",
-    "stderr",
-    "exit",
-})
+RECOGNIZED_FIELDS = frozenset(
+    {
+        "arity",
+        "input",
+        "output",
+        "methods",
+        "mime",
+        "mutates",
+        "parse-mode",
+        "stderr",
+        "exit",
+    }
+)
 
 VALID_INPUT = frozenset({"stdin"})
 VALID_OUTPUT = frozenset({"stdout"})

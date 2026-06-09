@@ -4,8 +4,6 @@ from __future__ import annotations
 
 import pytest
 
-from conformance.adapter import load_adapter
-from conformance.capabilities import load_manifest
 from conformance.httpclient import self_test
 from conformance.report import Outcome
 from conformance.rootcorpus import validate_roots
@@ -44,7 +42,9 @@ def pytest_configure(config: pytest.Config) -> None:
     config.addinivalue_line("markers", "conformance: wash conformance integration test")
 
 
-def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
+def pytest_collection_modifyitems(
+    config: pytest.Config, items: list[pytest.Item]
+) -> None:
     adapters = config.getoption("--wash-adapter")
     if not adapters:
         return
@@ -113,7 +113,15 @@ def test_conformance_gate(wash_report) -> None:
     failures = [
         r
         for r in wash_report.records
-        if r.outcome in {Outcome.FAIL, Outcome.UNTESTED, Outcome.LAUNCH_FAILURE, Outcome.PROCESS_DIED}
+        if r.outcome
+        in {
+            Outcome.FAIL,
+            Outcome.UNTESTED,
+            Outcome.LAUNCH_FAILURE,
+            Outcome.PROCESS_DIED,
+        }
         and r.tier == "MUST"
     ]
-    assert not failures, [f"{r.vector_id}: {r.outcome} {r.reason}" for r in failures[:10]]
+    assert not failures, [
+        f"{r.vector_id}: {r.outcome} {r.reason}" for r in failures[:10]
+    ]

@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from wash.filesystem import implied_cat_bytes
-from wash.metadata import CommandMetadata, map_exit_status
+from wash.metadata import map_exit_status
 from wash.parser import CommandStage, PipelineParse, RawCommandParse
 
 

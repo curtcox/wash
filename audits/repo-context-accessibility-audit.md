@@ -20,7 +20,7 @@ paths and line numbers are cited so they can be re-verified.
 - Previous gap: `specs/runtime.md` defines *runtime* terms, but the harness
   vocabulary an agent must understand to edit it — **vector, clause, tier,
   adapter, capability, materialize, synthesized root, corpus** — was scattered
-  across `harness/PLAN.md` prose with no single greppable definition list.
+  across the harness design prose with no single greppable definition list.
 - Implemented: added a `## Glossary` section to
   [`harness/AGENTS.md`](../harness/AGENTS.md).
 
@@ -31,16 +31,16 @@ paths and line numbers are cited so they can be re-verified.
   its adapter.
 - Implemented: added [`impls/AGENTS.md`](../impls/AGENTS.md).
 
-### 4. Add lint / format / type-check tooling and Make targets
+### 4. Add lint / format / type-check tooling and Make targets — Done
 - **Effort: M · Payoff: Med**
-- Gap: no Ruff/Black/mypy config exists, and there are no `make lint`/`make
-  format`/`make typecheck` targets — yet `.gitignore` already lists
-  `.ruff_cache/` and `.mypy_cache/`, signaling the intended stack. Without
-  enforced style, agents will reformat inconsistently and re-litigate choices.
-- First step: confirm Ruff + mypy with the maintainer (the `.gitignore` hint),
-  then add config to `harness/pyproject.toml` / `impls/reference/pyproject.toml`
-  and `lint`/`format`/`typecheck` Make targets. Prefer enforcing in a linter over
-  prose in `AGENTS.md`.
+- Previous gap: no Ruff/mypy config existed, and there were no `make lint`/`make
+  format`/`make typecheck` targets.
+- Implemented: added Ruff + mypy dev dependencies/config in
+  [`harness/pyproject.toml`](../harness/pyproject.toml) and
+  [`impls/reference/pyproject.toml`](../impls/reference/pyproject.toml), added
+  `lint`, `format`, and `typecheck` targets to [`Makefile`](../Makefile), and
+  wired lint/typecheck into
+  [`.github/workflows/conformance.yml`](../.github/workflows/conformance.yml).
 
 ### 5. Document the Python version landscape as a gotcha — Done
 - **Effort: S · Payoff: Low/Med**
@@ -52,13 +52,13 @@ paths and line numbers are cited so they can be re-verified.
   environments may be newer. The optional CI version matrix remains a separate
   maintainer decision.
 
-### 6. Rename `harness/PLAN.md` to `harness/DESIGN.md`
+### 6. Rename `harness/PLAN.md` to `harness/DESIGN.md` — Done
 - **Effort: S · Payoff: Low**
-- Gap: the filename reads as forward-looking planning, but `harness/PLAN.md:9`
-  describes an "implemented draft" recording design contracts. Needs a maintainer
-  decision before acting.
-- First step: if maintainers agree, `git mv harness/PLAN.md harness/DESIGN.md`
-  and update references in `README.md:14`, `AGENTS.md`, and `harness/AGENTS.md`.
+- Previous gap: the filename read as forward-looking planning, but the document
+  described an implemented draft recording design contracts.
+- Implemented: renamed the document to
+  [`harness/DESIGN.md`](../harness/DESIGN.md) and updated references in
+  [`README.md`](../README.md) and [`harness/pyproject.toml`](../harness/pyproject.toml).
 
 ### 7. Record PR / commit / release conventions (or confirm there are none)
 - **Effort: S · Payoff: Low**
@@ -78,7 +78,7 @@ rail that currently does nothing.
 1. **Wire `harness/tests/` into CI and the Makefile** (S · High) — Done
 2. **Add a harness glossary** (S · Med) — Done
 3. **Add `impls/AGENTS.md`** (S · Med) — Done
-4. **Add lint / format / type-check tooling** (M · Med)
+4. **Add lint / format / type-check tooling** (M · Med) — Done
 5. **Document the Python version landscape** (S · Low/Med) — Done
 
 ### Completed changes
@@ -87,6 +87,8 @@ rail that currently does nothing.
   it in `test`, and wired the same pytest self-tests into CI.
 - Added the harness glossary in `harness/AGENTS.md`.
 - Added `impls/AGENTS.md` for new implementation authors.
+- Added Ruff + mypy config, Make targets, and CI steps.
+- Renamed `harness/PLAN.md` to `harness/DESIGN.md` and updated references.
 - Documented the Python support floor and CI version in the root gotchas.
 
 ---
@@ -111,9 +113,6 @@ rail that currently does nothing.
 
 ## Questions for a maintainer
 
-- Lint/type stack: confirm **Ruff + mypy** (implied by `.gitignore`), or another
-  choice? Which directories should be in scope?
-- Should `harness/PLAN.md` be renamed to `harness/DESIGN.md`?
 - Are there PR title, commit message, branch naming, or release conventions to
   record in `AGENTS.md`?
 - Should CI test a Python version **matrix** (3.11–3.14) given the `>=3.11`

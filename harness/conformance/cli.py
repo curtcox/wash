@@ -7,12 +7,17 @@ import glob
 import sys
 from pathlib import Path
 
-from conformance.capabilities import load_manifest, validate_manifest
+from conformance.capabilities import load_manifest
 from conformance.httpclient import self_test
-from conformance.report import coverage_report, write_human, write_json, write_junit, write_matrix
+from conformance.report import (
+    coverage_report,
+    write_human,
+    write_json,
+    write_junit,
+    write_matrix,
+)
 from conformance.rootcorpus import validate_roots
 from conformance.runner import load_vectors, run, validate_vectors, vector_clause_map
-from conformance.spec import spec_label
 
 
 def _expand_adapters(patterns: list[str]) -> list[Path]:
@@ -75,13 +80,13 @@ def cmd_validate_capabilities(args: argparse.Namespace) -> int:
             continue
         try:
             if args.load or path.suffix == ".json":
-                data = load_manifest(path)
+                load_manifest(path)
             else:
                 from conformance.adapter import load_adapter
 
                 adapter = load_adapter(path)
                 cap_path = adapter.repo_root / adapter.capabilities
-                data = load_manifest(cap_path)
+                load_manifest(cap_path)
         except Exception as exc:
             errors.append(f"{path}: {exc}")
     if errors:
@@ -117,16 +122,24 @@ def cmd_self_test(_: argparse.Namespace) -> int:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="wash-conformance", description="wash conformance harness")
-    parser.add_argument("--strict", action="store_true", help="Treat SHOULD failures as gate failures")
+    parser = argparse.ArgumentParser(
+        prog="wash-conformance", description="wash conformance harness"
+    )
+    parser.add_argument(
+        "--strict", action="store_true", help="Treat SHOULD failures as gate failures"
+    )
     sub = parser.add_subparsers(dest="command", required=True)
 
     run_p = sub.add_parser("run", help="Run conformance vectors against adapter(s)")
-    run_p.add_argument("--adapter", action="append", required=True, help="Adapter manifest TOML")
+    run_p.add_argument(
+        "--adapter", action="append", required=True, help="Adapter manifest TOML"
+    )
     run_p.add_argument("--root", help="Filter by root name")
     run_p.add_argument("--tier", choices=["MUST", "SHOULD", "optional"])
     run_p.add_argument("--clause", help="Filter by clause id")
-    run_p.add_argument("--timeout", type=float, default=10.0, help="Per-request timeout seconds")
+    run_p.add_argument(
+        "--timeout", type=float, default=10.0, help="Per-request timeout seconds"
+    )
     run_p.add_argument("--json", help="Write JSON report path")
     run_p.add_argument("--junit", help="Write JUnit XML path")
     run_p.add_argument("--matrix", help="Write markdown matrix path")
@@ -140,8 +153,16 @@ def build_parser() -> argparse.ArgumentParser:
     vv.set_defaults(func=cmd_validate_vectors)
 
     vc = sub.add_parser("validate-capabilities", help="Validate capability manifest(s)")
-    vc.add_argument("manifest", nargs="+", help="Capability JSON or adapter TOML with capabilities path")
-    vc.add_argument("--load", action="store_true", help="Treat manifest args as capability JSON paths")
+    vc.add_argument(
+        "manifest",
+        nargs="+",
+        help="Capability JSON or adapter TOML with capabilities path",
+    )
+    vc.add_argument(
+        "--load",
+        action="store_true",
+        help="Treat manifest args as capability JSON paths",
+    )
     vc.set_defaults(func=cmd_validate_capabilities)
 
     cov = sub.add_parser("coverage", help="Report clause coverage from vectors")

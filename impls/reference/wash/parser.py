@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Literal
+from typing import Callable
 from urllib.parse import parse_qsl
 
 from wash.filesystem import (
@@ -146,7 +146,9 @@ def is_command(
     *,
     case_sensitive: bool = True,
 ) -> bool:
-    return resolve_command(name, command_dirs, case_sensitive=case_sensitive) is not None
+    return (
+        resolve_command(name, command_dirs, case_sensitive=case_sensitive) is not None
+    )
 
 
 def _remaining_raw_suffix(raw_segments: list[str], start: int) -> str:
@@ -284,9 +286,7 @@ def parse_request(
                             f"core arg query on non-command segment {arg_seg.name!r}",
                         )
                 argv.append(
-                    percent_decode_segment(
-                        segments[idx + offset], for_filesystem=False
-                    )
+                    percent_decode_segment(segments[idx + offset], for_filesystem=False)
                 )
             idx += 1 + arity
 

@@ -71,7 +71,9 @@ def read_http_response(sock: socket.socket, method: str) -> HttpSnapshot:
             raise ValueError("response headers too large")
     if b"\r\n\r\n" not in header_data:
         return HttpSnapshot(status=None, transport_error="EOF before response headers")
-    head, rest = header_data.split(b"\r\n\r\n", 1)
+    head_raw, rest_raw = header_data.split(b"\r\n\r\n", 1)
+    head = bytes(head_raw)
+    rest = bytes(rest_raw)
     status, headers = parse_response_headers(head)
 
     if method.upper() == "HEAD":
@@ -86,7 +88,9 @@ def read_http_response(sock: socket.socket, method: str) -> HttpSnapshot:
             expected = int(cl[-1])
             body = rest
             if len(body) < expected:
-                more = _read_exact_from(_PrefixedSocket(sock, b""), expected - len(body))
+                more = _read_exact_from(
+                    _PrefixedSocket(sock, b""), expected - len(body)
+                )
                 if more:
                     body += more
             body = body[:expected]
@@ -238,11 +242,8 @@ def _echo_server(port: int, received: list[bytes], ready: threading.Event) -> No
         body = (
             b"HTTP/1.1 200 OK\r\n"
             b"Content-Type: text/plain\r\n"
-            b"Content-Length: "
-            + str(len(first_line)).encode()
-            + b"\r\n"
-            b"Connection: close\r\n\r\n"
-            + first_line
+            b"Content-Length: " + str(len(first_line)).encode() + b"\r\n"
+            b"Connection: close\r\n\r\n" + first_line
         )
         conn.sendall(body)
     finally:
@@ -328,7 +329,9 @@ def _self_test_chunked() -> list[str]:
     t = threading.Thread(target=chunked_srv, args=(port,), daemon=True)
     t.start()
     ready.wait(timeout=5.0)
-    snap = send(f"http://127.0.0.1:{port}", {"method": "GET", "target": "/"}, timeout=5.0)
+    snap = send(
+        f"http://127.0.0.1:{port}", {"method": "GET", "target": "/"}, timeout=5.0
+    )
     t.join(timeout=5.0)
     if snap.body != b"hello":
         errors.append(f"chunked decode failed: {snap.body!r}")

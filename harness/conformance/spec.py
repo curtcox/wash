@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Literal
 
 SPEC_VERSION = "1"
@@ -25,7 +26,10 @@ CLAUSE_REGISTRY: dict[str, Clause] = {
     ),
     # runtime §6
     "RT-6.1-literal-file": Clause(
-        "RT-6.1-literal-file", "runtime §6.1", "MUST", "plain URL path maps literally to root file"
+        "RT-6.1-literal-file",
+        "runtime §6.1",
+        "MUST",
+        "plain URL path maps literally to root file",
     ),
     "RT-6.2-precedence": Clause(
         "RT-6.2-precedence",
@@ -66,7 +70,10 @@ CLAUSE_REGISTRY: dict[str, Clause] = {
     ),
     # runtime §9 lifecycle
     "RT-9.1-get-no-mutate": Clause(
-        "RT-9.1-get-no-mutate", "runtime §9.1", "MUST", "GET must not mutate local state"
+        "RT-9.1-get-no-mutate",
+        "runtime §9.1",
+        "MUST",
+        "GET must not mutate local state",
     ),
     "RT-9.2-put-literal": Clause(
         "RT-9.2-put-literal",
@@ -163,7 +170,10 @@ CLAUSE_REGISTRY: dict[str, Clause] = {
     ),
     # runtime §15 error handling
     "RT-15.1-not-found": Clause(
-        "RT-15.1-not-found", "runtime §15.1", "MUST", "no resource and no command parse → 404"
+        "RT-15.1-not-found",
+        "runtime §15.1",
+        "MUST",
+        "no resource and no command parse → 404",
     ),
     "RT-15.2-invalid-parse": Clause(
         "RT-15.2-invalid-parse",
@@ -218,7 +228,10 @@ CLAUSE_REGISTRY: dict[str, Clause] = {
     ),
     # pipeline §5 metadata
     "PP-5.1-arity-n": Clause(
-        "PP-5.1-arity-n", "pipeline §5.1", "MUST", "arity N consumes N path segments as argv"
+        "PP-5.1-arity-n",
+        "pipeline §5.1",
+        "MUST",
+        "arity N consumes N path segments as argv",
     ),
     "PP-5.2-arity-star": Clause(
         "PP-5.2-arity-star",
@@ -282,7 +295,10 @@ CLAUSE_REGISTRY: dict[str, Clause] = {
         "per-command query ends at next raw /",
     ),
     "PP-6.1-core-arg": Clause(
-        "PP-6.1-core-arg", "pipeline §6.1", "MUST", "arg is the only core query parameter"
+        "PP-6.1-core-arg",
+        "pipeline §6.1",
+        "MUST",
+        "arg is the only core query parameter",
     ),
     "PP-6.2-query-disables-arity": Clause(
         "PP-6.2-query-disables-arity",
@@ -460,9 +476,7 @@ def spec_label(repo_root: str | None = None) -> str:
     return f"{SPEC_VERSION}@{commit}"
 
 
-def _find_repo_root() -> "Path | None":
-    from pathlib import Path
-
+def _find_repo_root() -> Path | None:
     here = Path(__file__).resolve()
     for parent in [here, *here.parents]:
         if (parent / "specs" / "runtime.md").is_file():

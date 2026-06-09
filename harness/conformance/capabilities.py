@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import re
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
@@ -234,7 +233,9 @@ def max_error_body_bytes(manifest: dict[str, Any]) -> int:
     return int(manifest.get("max_error_body_bytes", 8192))
 
 
-def check_error_body_cap(manifest: dict[str, Any], status: int, body: bytes) -> str | None:
+def check_error_body_cap(
+    manifest: dict[str, Any], status: int, body: bytes
+) -> str | None:
     """SHOULD-tier check against declared max_error_body_bytes."""
     if 400 <= status < 600 and body and len(body) > max_error_body_bytes(manifest):
         return (

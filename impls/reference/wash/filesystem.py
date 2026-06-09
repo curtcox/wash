@@ -248,7 +248,9 @@ def put_file(
         current = current / part
         if current.exists() and current.is_symlink():
             resolved = current.resolve()
-            if symlink_policy == "reject-escaping" and not _is_under_root(root, resolved):
+            if symlink_policy == "reject-escaping" and not _is_under_root(
+                root, resolved
+            ):
                 raise SymlinkEscapeError("symlink escapes root")
         if not _is_under_root(root, current):
             raise RootEscapeError("path escapes root")
@@ -295,7 +297,9 @@ def implied_cat_bytes(
 ) -> bytes:
     if not raw_segments:
         return b""
-    fs_parts = [percent_decode_segment(raw, for_filesystem=True) for raw in raw_segments]
+    fs_parts = [
+        percent_decode_segment(raw, for_filesystem=True) for raw in raw_segments
+    ]
     resolved = resolve_under_root(
         root,
         fs_parts,

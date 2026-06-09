@@ -3,22 +3,35 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
 import jsonschema
 import yaml
 
-from conformance.adapter import LaunchError, LaunchedServer, load_adapter, launch, shutdown
-from conformance.capabilities import load_manifest
+from conformance.adapter import (
+    LaunchedServer,
+    LaunchError,
+    launch,
+    load_adapter,
+    shutdown,
+)
+from conformance.capabilities import harness_dir, load_manifest
 from conformance.compare import (
     compare_expectation,
     compare_head_pair,
     vector_runnable,
 )
 from conformance.httpclient import send
-from conformance.report import HttpSnapshot, Outcome, RunReport, TestRecord, finalize_report, new_report
-from conformance.capabilities import harness_dir
+from conformance.report import (
+    HttpSnapshot,
+    Outcome,
+    RunReport,
+    TestRecord,
+    finalize_report,
+    new_report,
+)
 from conformance.rootcorpus import (
     MaterializedRoot,
     can_materialize_for_caps,
@@ -35,7 +48,9 @@ def vectors_dir() -> Path:
 
 
 def load_vector_schema() -> dict[str, Any]:
-    return json.loads((harness_dir() / "vector.schema.json").read_text(encoding="utf-8"))
+    return json.loads(
+        (harness_dir() / "vector.schema.json").read_text(encoding="utf-8")
+    )
 
 
 def load_vectors(
@@ -83,7 +98,9 @@ def _validate_vector_refs(vectors: list[dict[str, Any]]) -> None:
                 raise ValueError(f"vector {v['id']}: unknown clause {cid!r}")
         head_of = v.get("expect", {}).get("head_of")
         if head_of and head_of not in ids:
-            raise ValueError(f"vector {v['id']}: head_of references missing {head_of!r}")
+            raise ValueError(
+                f"vector {v['id']}: head_of references missing {head_of!r}"
+            )
 
 
 def validate_vectors() -> list[str]:
@@ -101,11 +118,16 @@ def isolation_groups(vectors: list[dict[str, Any]]) -> list[list[dict[str, Any]]
     groups: list[list[dict[str, Any]]] = []
     for v in vectors:
         expect = v.get("expect", {})
-        if expect.get("no_mutation") or expect.get("mutation") or v["request"]["method"] in {
-            "PUT",
-            "DELETE",
-            "POST",
-        }:
+        if (
+            expect.get("no_mutation")
+            or expect.get("mutation")
+            or v["request"]["method"]
+            in {
+                "PUT",
+                "DELETE",
+                "POST",
+            }
+        ):
             groups.append([v])
         else:
             readonly.append(v)
@@ -115,7 +137,7 @@ def isolation_groups(vectors: list[dict[str, Any]]) -> list[list[dict[str, Any]]
 
 
 def run(
-    adapter_paths: list[str | Path],
+    adapter_paths: Sequence[str | Path],
     *,
     root: str | None = None,
     tier: str | None = None,
@@ -149,7 +171,9 @@ def run(
                 except LaunchError as exc:
                     for v in group:
                         report.records.append(
-                            _launch_failure_record(adapter.name, v, str(exc), exc.child_output)
+                            _launch_failure_record(
+                                adapter.name, v, str(exc), exc.child_output
+                            )
                         )
                     if materialized:
                         cleanup(materialized)
@@ -166,7 +190,9 @@ def run(
                 for vector in group:
                     if server and not server.is_alive():
                         report.records.append(
-                            _process_died_record(adapter.name, vector, server.captured_output())
+                            _process_died_record(
+                                adapter.name, vector, server.captured_output()
+                            )
                         )
                         continue
 
@@ -178,7 +204,11 @@ def run(
                         host_case_ok=case_ok,
                     )
                     if not runnable:
-                        outcome = Outcome.UNTESTED if skip_kind == "UNTESTED" else Outcome.SKIP
+                        outcome = (
+                            Outcome.UNTESTED
+                            if skip_kind == "UNTESTED"
+                            else Outcome.SKIP
+                        )
                         report.records.append(
                             TestRecord(
                                 impl=adapter.name,
@@ -194,8 +224,14 @@ def run(
                         )
                         continue
 
-                    before = materialized.snapshot_if_needed(vector) if materialized else None
-                    timeout = float(vector.get("per_request_timeout", per_request_timeout))
+                    before = (
+                        materialized.snapshot_if_needed(vector)
+                        if materialized
+                        else None
+                    )
+                    timeout = float(
+                        vector.get("per_request_timeout", per_request_timeout)
+                    )
                     actual = send(server.base_url, vector["request"], timeout=timeout)
 
                     if actual.transport_error and server and not server.is_alive():
@@ -206,9 +242,20 @@ def run(
                         )
                         continue
 
-                    after = materialized.snapshot_if_needed(vector) if materialized else None
+                    after = (
+                        materialized.snapshot_if_needed(vector)
+                        if materialized
+                        else None
+                    )
                     outcome, diff = _score_vector(
-                        vector, actual, caps, before, after, vectors_by_id, server, timeout
+                        vector,
+                        actual,
+                        caps,
+                        before,
+                        after,
+                        vectors_by_id,
+                        server,
+                        timeout,
                     )
                     report.records.append(
                         TestRecord(
@@ -257,14 +304,18 @@ def _score_vector(
 
     expect = vector.get("expect", {})
     head_of = expect.get("head_of")
-    failures = compare_expectation(expect, actual, caps=caps, before=before, after=after)
+    failures = compare_expectation(
+        expect, actual, caps=caps, before=before, after=after
+    )
 
     if head_of and head_of in vectors_by_id:
         get_vec = vectors_by_id[head_of]
-        get_actual = send(server.base_url, get_vec["request"], timeout=timeout) if server else actual
-        failures.extend(
-            compare_head_pair(expect, actual, get_actual, caps=caps)
+        get_actual = (
+            send(server.base_url, get_vec["request"], timeout=timeout)
+            if server
+            else actual
         )
+        failures.extend(compare_head_pair(expect, actual, get_actual, caps=caps))
 
     if failures:
         tier = vector.get("tier", "MUST")
@@ -283,7 +334,9 @@ def _tree_diff_text(before, after) -> str:
     return ", ".join(diff[:10])
 
 
-def _launch_failure_record(impl: str, vector: dict[str, Any], reason: str, child: str) -> TestRecord:
+def _launch_failure_record(
+    impl: str, vector: dict[str, Any], reason: str, child: str
+) -> TestRecord:
     return TestRecord(
         impl=impl,
         root=vector.get("root", ""),

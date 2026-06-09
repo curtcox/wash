@@ -9,6 +9,7 @@ import sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
+
 from wash.executor import (
     ExecutionError,
     PipelineResult,
@@ -50,7 +51,9 @@ class WashHTTPServer(ThreadingHTTPServer):
     daemon_threads = True
     allow_reuse_address = True
 
-    def __init__(self, server_address: tuple[str, int], handler_cls: type, config: ServerConfig) -> None:
+    def __init__(
+        self, server_address: tuple[str, int], handler_cls: type, config: ServerConfig
+    ) -> None:
         super().__init__(server_address, handler_cls)
         self.config = config
 
@@ -146,7 +149,9 @@ class WashRequestHandler(BaseHTTPRequestHandler):
         if result.pipeline_description:
             headers["X-WebShell-Pipeline"] = result.pipeline_description
         if result.source_path:
-            headers["X-WebShell-Source"] = str(self.server.config.root / result.source_path)
+            headers["X-WebShell-Source"] = str(
+                self.server.config.root / result.source_path
+            )
         return headers
 
     def _handle_filesystem_get(self, resource: FilesystemParse) -> None:
@@ -276,9 +281,13 @@ class WashRequestHandler(BaseHTTPRequestHandler):
                 extra["command"] = fail.name
                 extra["exit_status"] = fail.exit_code
                 if fail.stdout:
-                    extra["stdout"] = fail.stdout.decode("utf-8", errors="replace")[:8192]
+                    extra["stdout"] = fail.stdout.decode("utf-8", errors="replace")[
+                        :8192
+                    ]
                 if fail.stderr:
-                    extra["stderr"] = fail.stderr.decode("utf-8", errors="replace")[:8192]
+                    extra["stderr"] = fail.stderr.decode("utf-8", errors="replace")[
+                        :8192
+                    ]
             self._send_error(result.http_status, "command failed", extra=extra)
             return
 
@@ -340,7 +349,9 @@ class WashRequestHandler(BaseHTTPRequestHandler):
         if method == "POST" and isinstance(parsed, PipelineParse):
             for stage in parsed.stages:
                 if "POST" not in stage.metadata.methods:
-                    self._send_error(405, f"method POST not permitted by command {stage.name}")
+                    self._send_error(
+                        405, f"method POST not permitted by command {stage.name}"
+                    )
                     return
 
         self._handle_command(parsed, body=body)

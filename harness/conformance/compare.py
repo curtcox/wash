@@ -10,7 +10,6 @@ from typing import Any
 from conformance.capabilities import (
     check_error_body_cap,
     forbidden_when,
-    get_path_value,
     requires_capability,
 )
 from conformance.report import HttpSnapshot
@@ -48,7 +47,9 @@ def compare_expectation(
         branches = expect["one_of"]
         branch_errors = []
         for branch in branches:
-            errs = compare_expectation(branch, actual, caps=caps, before=before, after=after)
+            errs = compare_expectation(
+                branch, actual, caps=caps, before=before, after=after
+            )
             if not errs:
                 return []
             branch_errors.append("; ".join(errs))
@@ -316,7 +317,9 @@ def compare_head_pair(
                 if hvals != value:
                     failures.append(f"head header {name} mismatch")
             elif hvals != [value] and gvals == [value]:
-                failures.append(f"head header {name}: expected {value!r}, got {hvals!r}")
+                failures.append(
+                    f"head header {name}: expected {value!r}, got {hvals!r}"
+                )
     if "content-length" in {h.lower() for h in head_branch.get("header_present", [])}:
         if "content-length" not in head_actual.headers:
             failures.append("head Content-Length not present")

@@ -72,8 +72,10 @@ class TreeSnapshot:
                     st = p.lstat()
                 except OSError:
                     continue
-                kind = "symlink" if stat.S_ISLNK(st.st_mode) else (
-                    "dir" if stat.S_ISDIR(st.st_mode) else "file"
+                kind = (
+                    "symlink"
+                    if stat.S_ISLNK(st.st_mode)
+                    else ("dir" if stat.S_ISDIR(st.st_mode) else "file")
                 )
                 info: dict[str, Any] = {"type": kind}
                 if kind == "file":
@@ -111,10 +113,9 @@ def host_case_sensitive() -> bool:
         (p / "A").write_text("upper", encoding="utf-8")
         try:
             (p / "a").write_text("lower", encoding="utf-8")
-            _case_sensitive_cache = (
-                (p / "A").read_text(encoding="utf-8") == "upper"
-                and (p / "a").read_text(encoding="utf-8") == "lower"
-            )
+            _case_sensitive_cache = (p / "A").read_text(
+                encoding="utf-8"
+            ) == "upper" and (p / "a").read_text(encoding="utf-8") == "lower"
         except OSError:
             _case_sensitive_cache = False
     return _case_sensitive_cache
@@ -161,11 +162,7 @@ def list_roots() -> list[str]:
         return sorted(virtual)
     return sorted(
         virtual
-        | {
-            p.name
-            for p in base.iterdir()
-            if p.is_dir() and not p.name.startswith("_")
-        }
+        | {p.name for p in base.iterdir() if p.is_dir() and not p.name.startswith("_")}
     )
 
 
@@ -257,7 +254,7 @@ def _lib_has_interpreter(name: str) -> bool:
     if not lib.is_dir():
         return name == "sh"
     for cmd in _LIB_COMMANDS:
-        if (lib / f"{cmd}.{ 'py' if name == 'python3' else 'sh'}").is_file():
+        if (lib / f"{cmd}.{'py' if name == 'python3' else 'sh'}").is_file():
             return True
     return False
 
@@ -267,7 +264,11 @@ def _substitute_interpreter(root: Path, interpreter: str) -> None:
     lib = lib_dir()
     exec_path = root / "exec"
     for path in root.rglob("*"):
-        if path.is_file() and path.name not in {"exec", "path"} and not path.name.startswith("."):
+        if (
+            path.is_file()
+            and path.name not in {"exec", "path"}
+            and not path.name.startswith(".")
+        ):
             if path.parent.name == "meta":
                 continue
             if path.parts[-2:] == ("env", "path"):
@@ -286,12 +287,18 @@ def _substitute_interpreter(root: Path, interpreter: str) -> None:
                 new_lines.append(line)
                 continue
             parts = line.split()
-            if len(parts) >= 2 and parts[-1] == "sh" and parts[-1] != MISSING_INTERPRETER:
+            if (
+                len(parts) >= 2
+                and parts[-1] == "sh"
+                and parts[-1] != MISSING_INTERPRETER
+            ):
                 parts[-1] = interpreter
                 new_lines.append(" ".join(parts))
             else:
                 new_lines.append(line)
-        exec_path.write_text("\n".join(new_lines) + ("\n" if new_lines else ""), encoding="utf-8")
+        exec_path.write_text(
+            "\n".join(new_lines) + ("\n" if new_lines else ""), encoding="utf-8"
+        )
 
 
 def _apply_per_impl_fixtures(root: Path, caps: dict[str, Any], root_name: str) -> None:
@@ -346,8 +353,14 @@ def validate_roots(*, interpreter: str | None = None) -> list[str]:
 
         if interpreter:
             try:
-                mat = materialize(root_name, interpreter=interpreter, caps={"interpreters": [interpreter]})
-                errors.extend(_validate_root_tree(mat.path, f"{root_name}@{interpreter}"))
+                mat = materialize(
+                    root_name,
+                    interpreter=interpreter,
+                    caps={"interpreters": [interpreter]},
+                )
+                errors.extend(
+                    _validate_root_tree(mat.path, f"{root_name}@{interpreter}")
+                )
                 cleanup(mat)
             except Exception as exc:
                 errors.append(f"{root_name} materialize({interpreter}): {exc}")

@@ -57,7 +57,10 @@ def rebuild_precedence() -> None:
     write(root / "env" / "meta" / "grep", "arity 1\n")
     write(root / "exec", "wc sh\ngrep sh\n")
     linecount = (LIB / "linecount.sh").read_text(encoding="utf-8")
-    write(root / "bin" / "wc", "# wash-fixture: linecount\n" + linecount.split("\n", 1)[-1])
+    write(
+        root / "bin" / "wc",
+        "# wash-fixture: linecount\n" + linecount.split("\n", 1)[-1],
+    )
     lib_copy("grep", root / "bin" / "grep")
     write(root / "wc", "i am a regular file named wc")
     write(root / "grep" / "docs" / "file.txt", "served as a file, not a pipeline")

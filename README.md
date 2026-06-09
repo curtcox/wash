@@ -12,8 +12,8 @@ and composable command pipelines.
 ## Conformance harness
 
 The [`harness/`](harness/) package is a language-neutral evaluation harness (see
-[`harness/PLAN.md`](harness/PLAN.md)). It launches implementations over HTTP against a
-versioned root-directory corpus and declarative YAML vectors.
+[`harness/DESIGN.md`](harness/DESIGN.md)). It launches implementations over HTTP
+against a versioned root-directory corpus and declarative YAML vectors.
 
 ```bash
 # Install harness + reference implementation

@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "wash-conformance"
 version = "0.1.0"
 description = "Language-neutral conformance harness for wash implementations"
-readme = "PLAN.md"
+readme = "DESIGN.md"
 requires-python = ">=3.11"
 dependencies = [
     "pytest>=7.4",
@@ -16,7 +16,13 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest-xdist>=3.5"]
+dev = [
+    "mypy>=1.10",
+    "pytest-xdist>=3.5",
+    "ruff>=0.5",
+    "types-jsonschema>=4.20",
+    "types-PyYAML>=6.0",
+]
 
 [project.scripts]
 wash-conformance = "conformance.cli:main"
@@ -36,4 +42,20 @@ markers = [
     "must: MUST-tier spec clause vectors",
     "should: SHOULD-tier spec clause vectors",
     "optional: optional/implementation-defined vectors",
+]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 88
+
+[tool.ruff.lint]
+select = ["E", "F", "I"]
+ignore = ["E501"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = false
+warn_unused_configs = true
+files = [
+    "conformance",
 ]

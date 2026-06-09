@@ -1,4 +1,4 @@
-.PHONY: install validate test unit conformance coverage smoke-reference
+.PHONY: install validate test unit lint format typecheck conformance coverage smoke-reference
 
 PYTHON ?= python3
 
@@ -18,7 +18,19 @@ conformance:
 unit:
 	cd harness && $(PYTHON) -m pytest -q
 
-test: validate unit conformance
+lint:
+	ruff check harness/conformance harness/scripts harness/tests impls/reference/wash
+	ruff format --check harness/conformance harness/scripts harness/tests impls/reference/wash
+
+format:
+	ruff format harness/conformance harness/scripts harness/tests impls/reference/wash
+	ruff check --fix harness/conformance harness/scripts harness/tests impls/reference/wash
+
+typecheck:
+	cd harness && mypy conformance
+	cd impls/reference && mypy wash
+
+test: validate unit lint typecheck conformance
 
 coverage:
 	wash-conformance coverage
