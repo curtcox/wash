@@ -194,24 +194,30 @@ they are skipped).
 
 ## Implementation Order
 
-### Phase 1: Foundation
-1. **Project skeleton**: `go.mod`, `main.go`, basic HTTP server
-2. **Filesystem module**: Root resolution, exact path lookup, root-escape detection
-3. **Basic file serving**: GET for literal files, MIME inference by extension
+### Phase 1: Foundation ✅ COMPLETED
+1. **Project skeleton**: `go.mod`, `main.go`, basic HTTP server ✅
+2. **Filesystem module**: Root resolution, exact path lookup, root-escape detection ✅
+3. **Basic file serving**: GET for literal files, MIME inference by extension ✅
 4. **Adapter manifest + build target**: `harness/adapters/go.toml` pointing at the
    pre-built `impls/go/bin/wash-server`, plus a `build-go` Makefile target (see
    Integration Testing). Verify a build → conformance loop works end to end before
-   layering on behavior.
+   layering on behavior. ✅
 
-**Milestones**: Can serve static files from root directory; passes `plain-files` vectors
+**Milestones**: Can serve static files from root directory; passes `plain-files` vectors ✅
+- All 12 `plain-files` vectors passing (11 MUST + 1 SHOULD)
+- Build → conformance loop verified working
 
-### Phase 2: Command Path & Metadata
-1. **Command path loading**: `env/path` parsing
-2. **Metadata loader**: `env/meta/*` file reading
-3. **Metadata parser**: Line-oriented format, field validation
-4. **Basic command execution**: Single command, no pipeline
+### Phase 2: Command Path & Metadata 🔄 IN PROGRESS
+1. **Command path loading**: `env/path` parsing ✅
+2. **Metadata loader**: `env/meta/*` file reading ✅
+3. **Metadata parser**: Line-oriented format, field validation ✅
+4. **Basic command execution**: Single command, no pipeline 🔄
 
 **Milestones**: Commands resolve from path; metadata loads; basic command execution works
+- Created `internal/config/path.go` for env/path loading
+- Created `internal/config/exec.go` for exec rule loading
+- Created `internal/metadata/metadata.go` for metadata parsing
+- Created `internal/executor/executor.go` for command execution
 
 ### Phase 3: Pipeline Parsing
 1. **Segment parsing**: Raw target split, percent-decoding, query string extraction

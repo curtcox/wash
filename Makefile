@@ -1,4 +1,5 @@
-.PHONY: install validate test unit lint format typecheck conformance coverage smoke-reference
+.PHONY: install validate test unit lint format typecheck conformance coverage smoke-reference \
+	build-go lint-go test-go conformance-go test-go-all
 
 PYTHON ?= python3
 
@@ -10,6 +11,7 @@ validate:
 	wash-conformance validate-roots
 	wash-conformance validate-vectors
 	wash-conformance validate-capabilities harness/adapters/reference.toml
+	wash-conformance validate-capabilities harness/adapters/go.toml
 	wash-conformance coverage
 
 conformance:
@@ -37,3 +39,18 @@ coverage:
 
 smoke-reference:
 	$(PYTHON) -m wash.server --root harness/roots/plain-files --port 8080
+
+# Go implementation targets
+build-go:
+	cd impls/go && go build -o bin/wash-server ./cmd/wash-server
+
+lint-go:
+	cd impls/go && test -z "$$(gofmt -l .)" && go vet ./...
+
+test-go: build-go
+	cd impls/go && go test ./...
+
+conformance-go: build-go
+	wash-conformance run --adapter harness/adapters/go.toml
+
+test-go-all: lint-go test-go conformance-go

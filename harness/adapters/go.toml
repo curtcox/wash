@@ -1,0 +1,9 @@
+name        = "go"
+start       = ["impls/go/bin/wash-server", "--root", "{root}", "--port", "{port}"]
+stop        = "SIGTERM"
+port_mode   = "assigned"
+ready       = { type = "tcp" }
+ready_timeout_sec = 10
+cwd         = "."
+env         = {}
+capabilities = "impls/go/wash.capabilities.json"

@@ -64,3 +64,6 @@ harness/roots/_lib/exit*.py
 /post-mutate
 /sort
 /writeable
+
+# Go build artifacts
+impls/go/bin/

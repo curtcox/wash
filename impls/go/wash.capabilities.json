@@ -1,0 +1,24 @@
+{
+  "spec_version": "1",
+  "origin_form": "http://127.0.0.1",
+  "directory_listing": true,
+  "default_index_files": ["index.html"],
+  "synthesized_resources": { "enabled": false, "fixtures": [] },
+  "mime": {
+    "inference": "by-extension",
+    "map": { ".txt": "text/plain", ".json": "application/json" },
+    "default": "application/octet-stream"
+  },
+  "options_cors": "implementation-defined",
+  "symlink_policy": "reject-escaping",
+  "case_sensitive_lookup": true,
+  "execution_metadata_headers": true,
+  "error_body_formats": ["text/plain", "application/json"],
+  "max_error_body_bytes": 8192,
+  "writes_enabled": true,
+  "deletes_enabled": true,
+  "put_creates_parents": true,
+  "runtime_artifact_paths": [],
+  "interpreters": ["sh", "python3"],
+  "command_full_http_response": { "enabled": false }
+}
