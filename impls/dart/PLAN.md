@@ -4,6 +4,36 @@
 
 This document outlines the implementation plan for a Dart port of the wash Web Shell specification, targeting full conformance with all MUST and SHOULD clauses defined in `specs/runtime.md` and `specs/pipeline_parsing.md`.
 
+## Implementation Status
+
+**All phases complete.** Full conformance achieved.
+
+| Conformance tier | Result |
+|---|---|
+| MUST (112 clauses) | 112/112 ✓ |
+| SHOULD (1 clause) | 1/1 ✓ |
+| optional | 2/11 (9 skipped — capability-gated) |
+
+### Files delivered
+
+- `pubspec.yaml` — SDK ≥3.0, deps: `args`, `glob`, `test`
+- `bin/wash_server.dart` — CLI entry point (`--root`, `--port`)
+- `lib/filesystem/filesystem.dart` — path resolution, MIME, PUT/DELETE, root-escape, symlink policy
+- `lib/metadata/metadata.dart` — `env/meta/*` loader and field validator
+- `lib/parser/parser.dart` — URL pipeline parser (segments, precedence, arity, query argv, parse-mode raw)
+- `lib/executor/executor.dart` — interpreter resolution, stage runner, pipeline plumbing, exit mapping
+- `lib/server/server.dart` — HTTP server with `_PatchedServerSocket` raw-target injection
+- `test/parser/segment_test.dart` — 20 unit tests
+- `wash.capabilities.json` — capability declaration
+- `harness/adapters/dart.toml` — adapter manifest
+- `Makefile` targets: `build-dart`, `lint-dart`, `test-dart`, `conformance-dart`, `test-dart-all`
+- `.github/workflows/conformance.yml` — `conformance-dart` job (ubuntu + macos matrix)
+
+### Implementation notes
+
+- **Raw target preservation**: Dart's `HttpServer` normalises `/../` and `/%2e%2e/` before the handler runs. Solved via `_PatchedServerSocket` / `_PatchedSocket` which intercept the raw socket, sniff the request line, and inject the verbatim target as an `x-wash-raw-target` header before the HTTP parser sees the bytes.
+- **Dependency minimalism**: only `args` and `glob` beyond `dart:io`/`dart:convert`. `shelf` not used.
+
 ## Target Specifications
 
 - **Dart SDK Version**: Latest stable (3.x)

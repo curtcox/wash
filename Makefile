@@ -1,5 +1,6 @@
 .PHONY: install validate test unit lint format typecheck conformance coverage smoke-reference \
-	build-go lint-go test-go conformance-go test-go-all
+	build-go lint-go test-go conformance-go test-go-all \
+	build-dart lint-dart test-dart conformance-dart test-dart-all
 
 PYTHON ?= python3
 
@@ -12,6 +13,7 @@ validate:
 	wash-conformance validate-vectors
 	wash-conformance validate-capabilities harness/adapters/reference.toml
 	wash-conformance validate-capabilities harness/adapters/go.toml
+	wash-conformance validate-capabilities harness/adapters/dart.toml
 	wash-conformance coverage
 
 conformance:
@@ -54,3 +56,19 @@ conformance-go: build-go
 	wash-conformance run --adapter harness/adapters/go.toml
 
 test-go-all: lint-go test-go conformance-go
+
+# Dart implementation targets
+build-dart:
+	cd impls/dart && dart pub get && dart compile exe bin/wash_server.dart -o bin/wash-server
+
+lint-dart:
+	dart analyze impls/dart
+	dart format --output=none --set-exit-if-changed impls/dart
+
+test-dart: build-dart
+	cd impls/dart && dart test
+
+conformance-dart: build-dart
+	wash-conformance run --adapter harness/adapters/dart.toml
+
+test-dart-all: lint-dart test-dart conformance-dart

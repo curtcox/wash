@@ -23,6 +23,7 @@ jobs:
           wash-conformance validate-vectors
           wash-conformance validate-capabilities harness/adapters/reference.toml
           wash-conformance validate-capabilities harness/adapters/go.toml
+          wash-conformance validate-capabilities harness/adapters/dart.toml
           wash-conformance coverage
       - name: Harness self-tests
         run: cd harness && python -m pytest -q
@@ -61,3 +62,29 @@ jobs:
         run: pip install -e "./harness[dev]"
       - name: Run Go lint, unit tests, and conformance
         run: make test-go-all
+
+  conformance-dart:
+    runs-on: ${{ matrix.os }}
+    needs: validate
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dart-lang/setup-dart@v1
+        with:
+          sdk: stable
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Cache pub + build artifacts
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.pub-cache
+            impls/dart/.dart_tool
+          key: pub-${{ matrix.os }}-${{ hashFiles('impls/dart/pubspec.yaml') }}
+      - name: Install harness
+        run: pip install -e "./harness[dev]"
+      - name: Run Dart lint, unit tests, and conformance
+        run: make test-dart-all

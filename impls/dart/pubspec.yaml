@@ -1,0 +1,14 @@
+name: wash_server
+description: Dart port of the wash web shell runtime server.
+version: 1.0.0
+
+environment:
+  sdk: ">=3.0.0 <4.0.0"
+
+dependencies:
+  args: ^2.5.0
+  glob: ^2.1.0
+
+dev_dependencies:
+  test: ^1.25.0
+  lints: ^3.0.0

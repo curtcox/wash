@@ -67,3 +67,8 @@ harness/roots/_lib/exit*.py
 
 # Go build artifacts
 impls/go/bin/
+
+# Dart build artifacts
+impls/dart/bin/wash-server
+impls/dart/.dart_tool/
+impls/dart/.packages
