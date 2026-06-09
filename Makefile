@@ -1,6 +1,7 @@
 .PHONY: install validate test unit lint format typecheck conformance coverage smoke-reference \
 	build-go lint-go test-go conformance-go test-go-all \
-	build-dart lint-dart test-dart conformance-dart test-dart-all
+	build-dart lint-dart test-dart conformance-dart test-dart-all \
+	verify-site
 
 PYTHON ?= python3
 
@@ -72,3 +73,7 @@ conformance-dart: build-dart
 	wash-conformance run --adapter harness/adapters/dart.toml
 
 test-dart-all: lint-dart test-dart conformance-dart
+
+# Site generation verification (run before pushing docs/gen changes)
+verify-site:
+	$(PYTHON) docs/gen/verify_site.py

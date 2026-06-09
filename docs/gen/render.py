@@ -377,9 +377,9 @@ def _render_failure_card(failure: dict[str, Any], impl: str) -> str:
 
     # Expected vs Actual
     expected = failure.get("expected_summary", "")
-    actual = failure.get("actual", {})
-    actual_status = actual.get("status", "—")
-    actual_body = actual.get("body_base64", "")
+    actual = failure.get("actual") or {}
+    actual_status = actual.get("status", "—") if actual else "—"
+    actual_body = actual.get("body_base64", "") if actual else ""
     body_preview = ""
     if actual_body:
         import base64
