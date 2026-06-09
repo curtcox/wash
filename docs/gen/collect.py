@@ -15,10 +15,11 @@ import subprocess
 import time
 import tomllib
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from conformance.report import coverage_report
+from conformance.report import coverage_report, record_to_dict
 from conformance.runner import vector_clause_map
 from conformance.spec import CLAUSE_REGISTRY, SPEC_VERSION, spec_label
 
@@ -200,7 +201,7 @@ IMPLS: dict[str, dict[str, Any]] = {
             Step(
                 "testing",
                 "pytest (harness self-tests)",
-                [["python", "-m", "pytest", "-q"]],
+                [["python3", "-m", "pytest", "-q"]],
                 REPO / "harness",
             ),
             Step("static_analysis", "mypy", [["mypy", "wash"]], REF),
@@ -348,6 +349,196 @@ def summarize_conformance(records: list[dict[str, Any]]) -> dict[str, Any]:
     return impls
 
 
+def categorize_failure(rec: dict[str, Any]) -> str:
+    """Classify failure type for AI pattern matching."""
+    outcome = rec.get("outcome", "")
+    if outcome == "LAUNCH_FAILURE":
+        return "launch_failure"
+    if outcome == "PROCESS_DIED":
+        return "process_died"
+    if outcome == "UNTESTED":
+        return "untested"
+    if outcome == "TIMEOUT":
+        return "timeout"
+
+    diff = rec.get("diff", "")
+    reason = rec.get("reason", "").lower()
+    actual = rec.get("actual", {})
+    expected_summary = rec.get("expected_summary", "").lower()
+
+    if "status" in diff.lower() or "status" in reason:
+        return "status_mismatch"
+    if "body" in diff.lower() or "body" in reason:
+        return "body_mismatch"
+    if "header" in diff.lower():
+        return "header_mismatch"
+    if rec.get("tree_diff"):
+        return "tree_mismatch"
+    if "not found" in reason or "404" in str(actual.get("status", "")):
+        return "file_not_found"
+    if "capability" in reason.lower():
+        return "capability_declared"
+    if "timeout" in reason.lower():
+        return "timeout"
+
+    return "unknown"
+
+
+def generate_ai_context(
+    rec: dict[str, Any],
+    all_records: list[dict[str, Any]],
+    vectors_by_id: dict[str, dict[str, Any]],
+) -> dict[str, Any]:
+    """Generate AI-friendly context for a failure."""
+    vector_id = rec["vector_id"]
+    vector = vectors_by_id.get(vector_id, {})
+    clauses = rec.get("clauses", [])
+
+    # Find vector source file
+    vector_source = vector.get("_source", "harness/conformance/vectors/")
+
+    # Find root fixture path
+    root_name = vector.get("root", "unknown")
+    root_fixture = f"harness/roots/{root_name}"
+
+    # Build spec links from clauses
+    spec_links = []
+    for cid in clauses:
+        clause = CLAUSE_REGISTRY.get(cid)
+        if clause:
+            # Map clause source to HTML page
+            source = clause.source.lower()
+            if "runtime" in source:
+                spec_links.append(f"specs/runtime.html#{cid}")
+            elif "pipeline" in source:
+                spec_links.append(f"specs/pipeline_parsing.html#{cid}")
+            elif "audit" in source:
+                spec_links.append(f"specs/audit.html#{cid}")
+
+    # Find similar passing vectors (same clause, different vector)
+    similar_passing = []
+    for other in all_records:
+        if (
+            other["impl"] == rec["impl"]
+            and other["outcome"] == "PASS"
+            and any(c in other.get("clauses", []) for c in clauses)
+            and other["vector_id"] != vector_id
+        ):
+            similar_passing.append(other["vector_id"])
+            if len(similar_passing) >= 3:
+                break
+
+    # Generate suggested investigation
+    category = categorize_failure(rec)
+    suggestions = {
+        "launch_failure": "Check server startup logs and binary dependencies",
+        "process_died": "Server crashed during test - check stderr output",
+        "status_mismatch": "Compare expected vs actual status codes in implementation",
+        "body_mismatch": "Verify body content encoding and generation logic",
+        "header_mismatch": "Check header case sensitivity and required headers",
+        "tree_mismatch": "Verify file/directory creation and deletion operations",
+        "file_not_found": "Ensure test fixtures exist and paths are correct",
+        "capability_declared": "Check capability manifest matches implementation",
+        "timeout": "Investigate slow operations or deadlock scenarios",
+        "untested": "Implement support for this feature or update capability manifest",
+        "unknown": "Review full request/response diff for pattern",
+    }
+
+    return {
+        "vector_source": vector_source,
+        "root_fixture": root_fixture,
+        "spec_links": spec_links,
+        "suggested_investigation": suggestions.get(category, "Review failure details"),
+        "similar_passing": similar_passing,
+        "category": category,
+    }
+
+
+def build_detailed_failures(
+    records: list[dict[str, Any]],
+    impl: str,
+    vectors_by_id: dict[str, dict[str, Any]],
+) -> dict[str, Any]:
+    """Build detailed failure structure for JSON export."""
+    impl_records = [r for r in records if r["impl"] == impl]
+
+    # Build summary
+    summary = {"MUST": {"pass": 0, "total": 0, "fail": 0},
+               "SHOULD": {"pass": 0, "total": 0, "fail": 0},
+               "optional": {"pass": 0, "total": 0, "fail": 0}}
+
+    for rec in impl_records:
+        tier = rec.get("tier", "optional")
+        if tier in summary:
+            summary[tier]["total"] += 1
+            if rec["outcome"] in {"PASS", "SKIP", "WARN", "TIMEOUT"}:
+                summary[tier]["pass"] += 1
+            elif rec["outcome"] in {"FAIL", "LAUNCH_FAILURE", "PROCESS_DIED", "UNTESTED"}:
+                summary[tier]["fail"] += 1
+
+    # Build failures list with full details
+    failures = []
+    by_clause: dict[str, dict[str, Any]] = {}
+
+    for rec in impl_records:
+        if rec["outcome"] not in {"FAIL", "LAUNCH_FAILURE", "PROCESS_DIED", "UNTESTED"}:
+            continue
+
+        # Get full record details
+        detail = record_to_dict(rec)
+
+        # Add AI context
+        detail["ai_context"] = generate_ai_context(rec, records, vectors_by_id)
+
+        failures.append(detail)
+
+        # Build by_clause index
+        for clause in rec.get("clauses", []):
+            if clause not in by_clause:
+                by_clause[clause] = {"total": 0, "pass": 0, "fail": 0, "failure_ids": []}
+            by_clause[clause]["total"] += 1
+            if rec["outcome"] in {"FAIL", "LAUNCH_FAILURE", "PROCESS_DIED", "UNTESTED"}:
+                by_clause[clause]["fail"] += 1
+                by_clause[clause]["failure_ids"].append(rec["vector_id"])
+            else:
+                by_clause[clause]["pass"] += 1
+
+    return {
+        "summary": summary,
+        "failures": failures,
+        "by_clause": by_clause,
+    }
+
+
+def write_failure_json(
+    records: list[dict[str, Any]],
+    impl: str,
+    impl_cfg: dict[str, Any],
+    commit: str,
+    vectors_by_id: dict[str, dict[str, Any]],
+) -> None:
+    """Write per-implementation detailed failures JSON."""
+    failures_dir = BUILD / "failures"
+    failures_dir.mkdir(parents=True, exist_ok=True)
+
+    detail = build_detailed_failures(records, impl, vectors_by_id)
+
+    payload = {
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "commit": commit,
+        "impl": impl,
+        "language": impl_cfg.get("language", impl),
+        "summary": detail["summary"],
+        "failure_count": len(detail["failures"]),
+        "failures": detail["failures"],
+        "by_clause": detail["by_clause"],
+    }
+
+    out_path = failures_dir / f"{impl}-failures.json"
+    out_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    print(f"wrote {out_path}")
+
+
 def clause_matrix(
     records: list[dict[str, Any]], impls: list[str]
 ) -> dict[str, dict[str, str]]:
@@ -394,7 +585,13 @@ def main() -> None:
     records = conf["records"]
     conf_summary = summarize_conformance(records)
 
+    # Load vectors for AI context generation
+    from conformance.runner import load_vectors
+    vectors_list = load_vectors()
+    vectors_by_id = {v["id"]: v for v in vectors_list}
+
     impls_out: dict[str, Any] = {}
+    commit = _git("rev-parse", "HEAD")
     for name, cfg in IMPLS.items():
         impls_out[name] = {
             "language": cfg["language"],
@@ -404,6 +601,8 @@ def main() -> None:
             "metrics": code_metrics(cfg["dir"]),
             "conformance": conf_summary.get(name, {}),
         }
+        # Generate detailed failure JSON for each implementation
+        write_failure_json(records, name, cfg, commit, vectors_by_id)
 
     cov = coverage_report(vector_clause_map())
     data = {

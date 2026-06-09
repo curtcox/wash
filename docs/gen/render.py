@@ -23,6 +23,7 @@ NAV = [
     ("index.html", "Home"),
     ("compliance.html", "Compliance"),
     ("ci.html", "CI results"),
+    ("failures/index.html", "Failure Analysis"),
     ("coverage.html", "Spec coverage"),
     ("specs/runtime.html", "Runtime spec"),
     ("specs/pipeline_parsing.html", "Pipeline parsing"),
@@ -216,6 +217,7 @@ def render_ci() -> str:
             )
 
         fails = c.get("failures", [])
+        fail_count = len(fails)
         if fails:
             fail_rows = "".join(
                 f"<li><code>{e(f['vector'])}</code> "
@@ -225,9 +227,12 @@ def render_ci() -> str:
                 + "</li>"
                 for f in fails
             )
-            conf_detail = f'<details open><summary>{len(fails)} failing vector(s)</summary><ul class="fails">{fail_rows}</ul></details>'
+            conf_detail = f'<details open><summary>{fail_count} failing vector(s)</summary><ul class="fails">{fail_rows}</ul></details>'
         else:
             conf_detail = '<p class="ok">All vectors pass.</p>'
+
+        # Link to detailed failure analysis
+        fail_link = f'<p><a href="failures/{e(name)}.html" class="btn">Detailed failure analysis &rarr;</a></p>' if fail_count > 0 else ''
 
         largest = m["largest_file"]
         sections.append(
@@ -243,6 +248,7 @@ def render_ci() -> str:
             '<p class="tiers">'
             f"MUST {tier_cell(c.get('MUST'))} · SHOULD {tier_cell(c.get('SHOULD'))} · optional {tier_cell(c.get('optional'))}</p>"
             f"{conf_detail}"
+            f"{fail_link}"
             "<h3>Checks</h3>"
             f'<div class="steps">{"".join(step_cards)}</div>'
             "<h3>Code metrics</h3>"
@@ -322,6 +328,257 @@ def render_spec(src: Path, title: str) -> str:
     return page(title, body, depth=1)
 
 
+# ----- failure analysis pages -------------------------------------------------------
+
+
+# Category colors for badges
+CATEGORY_BADGE = {
+    "status_mismatch": "badge-fail",
+    "body_mismatch": "badge-fail",
+    "header_mismatch": "badge-fail",
+    "tree_mismatch": "badge-fail",
+    "file_not_found": "badge-fail",
+    "launch_failure": "badge-error",
+    "process_died": "badge-error",
+    "timeout": "badge-warn",
+    "capability_declared": "badge-warn",
+    "untested": "badge-warn",
+    "unknown": "badge-warn",
+}
+
+
+def _outcome_badge(outcome: str) -> str:
+    cls = "badge fail" if outcome in {"FAIL", "LAUNCH_FAILURE", "PROCESS_DIED"} else "badge warn"
+    return f'<span class="{cls}">{e(outcome)}</span>'
+
+
+def _render_failure_card(failure: dict[str, Any], impl: str) -> str:
+    """Render a single failure as an expandable card."""
+    vector_id = failure["vector_id"]
+    outcome = failure.get("outcome", "FAIL")
+    clauses = failure.get("clauses", [])
+    category = failure.get("ai_context", {}).get("category", "unknown")
+    diff = failure.get("diff", "")
+    reason = failure.get("reason", "")
+
+    # Build clause links
+    clause_links = ", ".join(
+        f'<a href="../coverage.html#{e(c)}"><code>{e(c)}</code></a>' for c in clauses
+    )
+
+    # Category badge
+    cat_cls = CATEGORY_BADGE.get(category, "badge-warn")
+    cat_badge = f'<span class="badge {cat_cls}">{e(category)}</span>'
+
+    # Request details
+    req_method = failure.get("request_method", "")
+    req_target = failure.get("request_target", "")
+    request_info = f'<code>{e(req_method)} {e(req_target)}</code>' if req_method else ""
+
+    # Expected vs Actual
+    expected = failure.get("expected_summary", "")
+    actual = failure.get("actual", {})
+    actual_status = actual.get("status", "—")
+    actual_body = actual.get("body_base64", "")
+    body_preview = ""
+    if actual_body:
+        import base64
+        try:
+            decoded = base64.b64decode(actual_body).decode("utf-8", errors="replace")[:200]
+            body_preview = f"<pre class='body-preview'>{e(decoded)}</pre>"
+        except Exception:
+            pass
+
+    # AI Context
+    ai_ctx = failure.get("ai_context", {})
+    spec_links = ai_ctx.get("spec_links", [])
+    spec_html = ""
+    if spec_links:
+        spec_html = "<ul>" + "".join(f'<li><a href="../{e(l)}">{e(l)}</a></li>' for l in spec_links) + "</ul>"
+
+    similar = ai_ctx.get("similar_passing", [])
+    similar_html = ""
+    if similar:
+        similar_html = "<p>Similar passing vectors: " + ", ".join(f"<code>{e(s)}</code>" for s in similar[:3]) + "</p>"
+
+    suggested = ai_ctx.get("suggested_investigation", "")
+
+    card = f"""
+<div class="failure-card" data-category="{e(category)}" data-tier="{e(failure.get('tier', 'optional'))}">
+  <div class="failure-header">
+    <span class="failure-id"><code>{e(vector_id)}</code></span>
+    {_outcome_badge(outcome)}
+    {cat_badge}
+  </div>
+  <div class="failure-clauses">Clauses: {clause_links}</div>
+  <div class="failure-request">{request_info}</div>
+  <details>
+    <summary>Details</summary>
+    <div class="failure-details">
+      <div class="row">
+        <div class="col">
+          <h4>Expected</h4>
+          <pre>{e(expected) if expected else "See vector definition"}</pre>
+        </div>
+        <div class="col">
+          <h4>Actual</h4>
+          <p>Status: <b>{actual_status}</b></p>
+          {body_preview}
+        </div>
+      </div>
+      {f'<div class="diff"><h4>Diff</h4><pre>{e(diff)}</pre></div>' if diff else ""}
+      {f'<div class="reason"><h4>Reason</h4><p>{e(reason)}</p></div>' if reason else ""}
+      <div class="ai-context">
+        <h4>AI Analysis Context</h4>
+        <p><b>Suggested investigation:</b> {e(suggested)}</p>
+        {similar_html}
+        <p><b>Spec references:</b></p>
+        {spec_html or "<p class='muted'>No spec links available</p>"}
+        <p class="muted">Vector source: <code>{e(ai_ctx.get('vector_source', 'unknown'))}</code></p>
+        <p class="muted">Fixture root: <code>{e(ai_ctx.get('root_fixture', 'unknown'))}</code></p>
+      </div>
+    </div>
+  </details>
+</div>
+"""
+    return card
+
+
+def render_failures_page(impl: str, data: dict[str, Any]) -> str:
+    """Render detailed failure analysis page for an implementation."""
+    summary = data.get("summary", {})
+    failures = data.get("failures", [])
+    language = data.get("language", impl)
+    commit = data.get("commit", "")[:8]
+
+    # Summary section
+    must = summary.get("MUST", {})
+    should = summary.get("SHOULD", {})
+    optional = summary.get("optional", {})
+
+    summary_html = f"""
+    <div class="summary-grid">
+      <div class="summary-card must">
+        <span class="tier">MUST</span>
+        <span class="count">{must.get('pass', 0)}/{must.get('total', 0)}</span>
+        <span class="label">passing</span>
+        <span class="fail">{must.get('fail', 0)} failing</span>
+      </div>
+      <div class="summary-card should">
+        <span class="tier">SHOULD</span>
+        <span class="count">{should.get('pass', 0)}/{should.get('total', 0)}</span>
+        <span class="label">passing</span>
+        <span class="fail">{should.get('fail', 0)} failing</span>
+      </div>
+      <div class="summary-card optional">
+        <span class="tier">optional</span>
+        <span class="count">{optional.get('pass', 0)}/{optional.get('total', 0)}</span>
+        <span class="label">passing</span>
+        <span class="fail">{optional.get('fail', 0)} failing</span>
+      </div>
+    </div>
+    """
+
+    # Download button
+    download_section = f"""
+    <div class="download-section">
+      <a href="{e(impl)}-failures.json" download class="btn-primary">
+        Download {e(language)} Failures JSON
+      </a>
+      <span class="muted">For AI tooling · {len(failures)} failures · commit {e(commit)}</span>
+    </div>
+    """
+
+    # Filters
+    filters = """
+    <div class="filters">
+      <label>Filter by tier:</label>
+      <button onclick="filterFailures('all')">All</button>
+      <button onclick="filterFailures('MUST')">MUST</button>
+      <button onclick="filterFailures('SHOULD')">SHOULD</button>
+      <button onclick="filterFailures('optional')">Optional</button>
+      <label style="margin-left: 1rem;">Category:</label>
+      <button onclick="filterCategory('all')">All</button>
+      <button onclick="filterCategory('status_mismatch')">Status</button>
+      <button onclick="filterCategory('body_mismatch')">Body</button>
+      <button onclick="filterCategory('launch_failure')">Launch</button>
+    </div>
+    <script>
+    function filterFailures(tier) {
+      document.querySelectorAll('.failure-card').forEach(card => {
+        card.style.display = tier === 'all' || card.dataset.tier === tier ? 'block' : 'none';
+      });
+    }
+    function filterCategory(cat) {
+      document.querySelectorAll('.failure-card').forEach(card => {
+        card.style.display = cat === 'all' || card.dataset.category === cat ? 'block' : 'none';
+      });
+    }
+    </script>
+    """
+
+    # Failure cards
+    if failures:
+        # Sort: MUST first, then by outcome severity
+        def sort_key(f):
+            tier_order = {"MUST": 0, "SHOULD": 1, "optional": 2}
+            outcome_order = {"LAUNCH_FAILURE": 0, "PROCESS_DIED": 1, "FAIL": 2, "UNTESTED": 3}
+            return (tier_order.get(f.get("tier"), 3), outcome_order.get(f.get("outcome"), 4), f.get("vector_id", ""))
+
+        sorted_failures = sorted(failures, key=sort_key)
+        failure_cards = "".join(_render_failure_card(f, impl) for f in sorted_failures)
+    else:
+        failure_cards = '<p class="ok">All tests pass. No failures to display.</p>'
+
+    body = f"""
+    <h1>{e(language)} Failure Analysis</h1>
+    <p class="muted">Detailed conformance failures for iterative AI-assisted fixing.</p>
+    {summary_html}
+    {download_section}
+    {filters if failures else ""}
+    <h2>Failures ({len(failures)})</h2>
+    <div class="failure-list">
+      {failure_cards}
+    </div>
+    """
+
+    return page(f"{language} Failures", body)
+
+
+def render_failures_index(impls_data: dict[str, dict[str, Any]]) -> str:
+    """Render overview page listing all implementations' failure analysis."""
+    cards = []
+    for impl, data in sorted(impls_data.items()):
+        lang = data.get("language", impl)
+        summary = data.get("summary", {})
+        must = summary.get("MUST", {})
+        fail_count = data.get("failure_count", 0)
+
+        cls = "has-failures" if fail_count > 0 else "all-pass"
+        status = f"{fail_count} failures" if fail_count > 0 else "All pass"
+        must_str = f"MUST: {must.get('pass', 0)}/{must.get('total', 0)}"
+
+        cards.append(f"""
+        <a href="{e(impl)}.html" class="impl-card {cls}">
+          <h3>{e(lang)} <span class="impl-name">({e(impl)})</span></h3>
+          <p class="big">{e(status)}</p>
+          <p class="muted">{e(must_str)}</p>
+          <span class="download-hint">View details &rarr;</span>
+        </a>
+        """)
+
+    body = f"""
+    <h1>Failure Analysis by Implementation</h1>
+    <p>Per-language conformance failure details for AI-assisted debugging.</p>
+    <section class="cards">
+      {"".join(cards)}
+    </section>
+    <p class="muted">Each page provides downloadable JSON with full failure context for programmatic analysis.</p>
+    """
+
+    return page("Failure Analysis", body)
+
+
 # ----- helpers ----------------------------------------------------------------------
 
 
@@ -382,6 +639,7 @@ def main() -> None:
         shutil.rmtree(SITE)
     (SITE / "specs").mkdir(parents=True)
     (SITE / "assets").mkdir(parents=True)
+    (SITE / "failures").mkdir(parents=True)
     shutil.copyfile(GEN / "assets/style.css", SITE / "assets/style.css")
 
     (SITE / "index.html").write_text(render_index(), encoding="utf-8")
@@ -398,6 +656,30 @@ def main() -> None:
     (SITE / "specs/audit.html").write_text(
         render_spec(ROOT / "specs/audit.md", "Audit"), encoding="utf-8"
     )
+
+    # Generate failure analysis pages
+    failures_build = BUILD / "failures"
+    if failures_build.exists():
+        impls_failures: dict[str, dict[str, Any]] = {}
+        for json_file in sorted(failures_build.glob("*-failures.json")):
+            impl = json_file.stem.replace("-failures", "")
+            impl_data = json.loads(json_file.read_text(encoding="utf-8"))
+            impls_failures[impl] = impl_data
+            # Copy JSON to site
+            shutil.copyfile(json_file, SITE / "failures" / json_file.name)
+            # Generate HTML page
+            (SITE / "failures" / f"{impl}.html").write_text(
+                render_failures_page(impl, impl_data), encoding="utf-8"
+            )
+            print(f"wrote failures/{impl}.html and {json_file.name}")
+
+        # Generate failures index page
+        if impls_failures:
+            (SITE / "failures" / "index.html").write_text(
+                render_failures_index(impls_failures), encoding="utf-8"
+            )
+            print("wrote failures/index.html")
+
     print(f"wrote site to {SITE}")
 
 
