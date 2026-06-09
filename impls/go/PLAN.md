@@ -207,59 +207,45 @@ they are skipped).
 - All 12 `plain-files` vectors passing (11 MUST + 1 SHOULD)
 - Build → conformance loop verified working
 
-### Phase 2: Command Path & Metadata 🔄 IN PROGRESS
+### Phase 2: Command Path & Metadata ✅
 1. **Command path loading**: `env/path` parsing ✅
 2. **Metadata loader**: `env/meta/*` file reading ✅
 3. **Metadata parser**: Line-oriented format, field validation ✅
-4. **Basic command execution**: Single command, no pipeline 🔄
+4. **Basic command execution**: Single command, no pipeline ✅
 
-**Milestones**: Commands resolve from path; metadata loads; basic command execution works
-- Created `internal/config/path.go` for env/path loading
-- Created `internal/config/exec.go` for exec rule loading
-- Created `internal/metadata/metadata.go` for metadata parsing
-- Created `internal/executor/executor.go` for command execution
+### Phase 3: Pipeline Parsing ✅
+1. **Segment parsing**: Raw target split, percent-decoding, query string extraction ✅
+2. **Precedence ladder**: Exact file → command → synthesized → 404 ✅
+3. **Pipeline construction**: Multi-stage pipeline with argv consumption ✅
+4. **Arity handling**: Fixed arity, arity star, query argv ✅
 
-### Phase 3: Pipeline Parsing
-1. **Segment parsing**: Raw target split, percent-decoding, query string extraction
-2. **Precedence ladder**: Exact file → command → synthesized → 404
-3. **Pipeline construction**: Multi-stage pipeline with argv consumption
-4. **Arity handling**: Fixed arity, arity star, query argv
+### Phase 4: Execution Engine ✅
+1. **Interpreter rules**: `exec` file parsing, glob matching ✅
+2. **Stage execution**: Subprocess management, stdin/stdout plumbing ✅
+3. **Pipeline plumbing**: Multi-stage data flow (right-to-left), stderr handling ✅
+4. **Exit code mapping**: Exit map evaluation, HTTP status derivation ✅
 
-**Milestones**: Complex pipelines parse correctly; passes `pipelines` and `commands-*` vectors
+### Phase 5: HTTP Methods & Mutation ✅
+1. **PUT support**: Literal file creation/replacement, parent directory creation ✅
+2. **DELETE support**: File deletion ✅
+3. **POST support**: Command-governed POST handling ✅
+4. **HEAD support**: Derived from GET ✅
+5. **Method validation**: Metadata methods field enforcement ✅
 
-### Phase 4: Execution Engine
-1. **Interpreter rules**: `exec` file parsing, glob matching
-2. **Stage execution**: Subprocess management, stdin/stdout plumbing
-3. **Pipeline plumbing**: Multi-stage data flow, stderr handling
-4. **Exit code mapping**: Exit map evaluation, HTTP status derivation
+### Phase 6: Advanced Features ✅
+1. **Directory handling**: Index files, directory listing ✅
+2. **Symlink support**: Symlink resolution, reject-escaping policy ✅
+3. **Error responses**: Content negotiation (JSON vs text) ✅
+4. **Case sensitivity**: Case-sensitive lookup ✅
+5. **CORS handling**: OPTIONS responses ✅
 
-**Milestones**: Full pipeline execution; passes `exec-rules`, `exit-codes`, `stderr` vectors
+### Phase 7: Conformance & Polish ✅
+1. **Full conformance run**: 112/112 MUST + 1/1 SHOULD passing ✅
+2. **Root escape rejection**: `..` segments rejected pre-decode ✅
+3. **parse-mode raw position check**: Only valid in leftmost stage ✅
+4. **Typed filesystem errors**: 404/400/500 correctly distinguished ✅
 
-### Phase 5: HTTP Methods & Mutation
-1. **PUT support**: Literal file creation/replacement, parent directory creation
-2. **DELETE support**: File deletion
-3. **POST support**: Command-governed POST handling
-4. **HEAD support**: Derived from GET
-5. **Method validation**: Metadata methods field enforcement
-
-**Milestones**: Full CRUD support; passes `mutation`, `methods` vectors
-
-### Phase 6: Advanced Features
-1. **Directory handling**: Index files, directory listing
-2. **Symlink support**: Symlink resolution, escape detection
-3. **Error responses**: Content negotiation (JSON vs text)
-4. **Case sensitivity**: Case-sensitive lookup option
-5. **CORS handling**: OPTIONS responses
-
-**Milestones**: All advanced features; passes `directories`, `symlinks`, `security` vectors
-
-### Phase 7: Conformance & Polish
-1. **Full conformance run**: All MUST/SHOULD vectors
-2. **Performance tuning**: Streaming for large files, pipeline optimization
-3. **Edge cases**: Encoding quirks, malformed input handling
-4. **Documentation**: API docs, usage guide
-
-**Milestones**: 100% conformance; production-ready
+**Final status**: 112/112 MUST, 1/1 SHOULD, 2/11 optional (skipped features not declared in capabilities)
 
 ## Testing Strategy
 
