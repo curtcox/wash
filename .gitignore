@@ -72,3 +72,6 @@ impls/go/bin/
 impls/dart/bin/wash-server
 impls/dart/.dart_tool/
 impls/dart/.packages
+
+# Generated developer site (built by docs/gen + .github/workflows/pages.yml)
+/site/
