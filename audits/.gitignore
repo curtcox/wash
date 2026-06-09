@@ -1,0 +1,4 @@
+# Audit requests/reports are transient working files: do them, then delete to
+# limit noise. Keep the directory in git, ignore everything dropped into it.
+*
+!.gitignore

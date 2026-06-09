@@ -8,8 +8,9 @@
 - `harness/conformance/`: Python conformance harness and CLI.
 - `harness/conformance/vectors/`: declarative YAML test vectors. Each vector should cite stable clause IDs from `harness/conformance/spec.py`.
 - `harness/roots/`: canonical fixture root corpus. Treat fixture contents as test data, not app code.
+- `harness/shared/`: fixtures shared across roots — e.g. command dirs that live *outside* a served root (used by the `path-outside` vectors). Materialized as a sibling bundle so `../shared/bin` entries resolve. Test data, not app code.
 - `harness/scripts/rebuild_corpus.py`: destructive corpus rewrite helper; inspect diffs carefully after running.
-- `impls/reference/wash/`: minimal Python reference server. The harness must launch it through `harness/adapters/reference.toml`, not import it.
+- `impls/`: one subdirectory per implementation. `impls/reference/` is the Python reference server (see `impls/reference/AGENTS.md`); additional language impls (bash, deno, go, groovy, java, lua, perl, ruby, rust, swift, …) are planned and slot in alongside it. Every impl is launched through its own `harness/adapters/*.toml`, never imported by the harness.
 
 ## Setup
 ```bash
@@ -17,15 +18,31 @@ pip install -e ./harness[dev]
 pip install -e ./impls/reference
 ```
 
-## Canonical Checks
-```bash
-wash-conformance validate-roots
-wash-conformance validate-vectors
-wash-conformance validate-capabilities harness/adapters/reference.toml
-wash-conformance coverage
-cd harness && python -m pytest -q
-wash-conformance run --adapter harness/adapters/reference.toml
-```
+## Common Commands (prefer these)
+Run from the repo root. Targets live in `Makefile`.
+
+| Task                 | Command            |
+|----------------------|--------------------|
+| Install (editable)   | `make install`     |
+| Validate corpus      | `make validate`    |
+| Unit/self-tests      | `make unit`        |
+| Lint + format check  | `make lint`        |
+| Auto-format + fix    | `make format`      |
+| Type-check           | `make typecheck`   |
+| Conformance run      | `make conformance` |
+| Everything (CI gate) | `make test`        |
+
+`make test` is what CI enforces (`.github/workflows/conformance.yml`, Python 3.12):
+validate + harness self-tests + `make lint` + `make typecheck` + conformance. Run
+it before pushing. For tighter loops, see "Fast Loops" below.
+
+## Change Propagation
+Behavior is defined in four places that must stay in sync:
+`specs/*.md` (normative) → clause IDs in `harness/conformance/spec.py` →
+vectors in `harness/conformance/vectors/*.yaml` → each implementation under
+`impls/`. Change one corner, update the others or conformance fails. When an
+implementation and the spec disagree, resolve it case by case; the long-term
+goal is zero differences across all implementations.
 
 ## Fast Loops
 ```bash
