@@ -1,43 +1,8 @@
-# Repo Context Accessibility Audit (Second Pass)
+# Repo Context Accessibility Audit
 
-Audited 2026-06-09. Scope: root docs, top-level layout, harness tooling,
-conformance vectors, reference implementation, CI, and local agent-facing config.
-Every claim below was checked against the file on disk; paths and line numbers
-are cited so they can be re-verified.
-
-## Context: this is a second pass
-
-A first accessibility pass already landed (commits `e3c59a3`, `864269a`,
-`8d34ba2`). I re-verified its claims rather than trusting them, and they hold:
-
-- Root [`AGENTS.md`](AGENTS.md), [`CLAUDE.md`](CLAUDE.md) (imports `@AGENTS.md`),
-  [`harness/AGENTS.md`](harness/AGENTS.md), and
-  [`harness/roots/AGENTS.md`](harness/roots/AGENTS.md) all exist and orient well.
-- [`Makefile`](Makefile) wraps install/validate/conformance/coverage/smoke.
-- [`.editorconfig`](.editorconfig), [`harness/roots/_lib/README.md`](harness/roots/_lib/README.md),
-  and the rebuild-script warning (`harness/scripts/rebuild_corpus.py:1`) are present.
-- The import-boundary self-test exists (`harness/tests/test_self.py:15`).
-- The package boundary (`conformance` must not `import wash`) is stated in both
-  [`AGENTS.md`](AGENTS.md) and [`harness/AGENTS.md:7`](harness/AGENTS.md).
-
-So this pass focuses on **what the first pass missed or left open**. The headline
-finding: the safety rail the first pass was proudest of — the import-boundary
-self-test — never actually runs. Several recommendations below are small but
-fix genuine gaps; the repo is otherwise in good shape for its size and stage.
-
-## What still works well (don't "improve" these away)
-
-- The spec is the source of truth and already defines runtime domain terms in a
-  greppable section (`specs/runtime.md:132`, "## 5. Terminology").
-- Clause IDs are stable and carry their source section inline
-  (`harness/conformance/spec.py:25` onward, each `Clause(... "runtime §6.2" ...)`).
-- The three-tier `AGENTS.md` layout (root → harness → roots) is exactly the
-  scoped-doc pattern this audit recommends; resist adding more.
-- `.gitignore` is unusually well-commented, including a macOS case-insensitive-FS
-  trap for `env/` fixtures (`.gitignore:11`) and the generated `exit*` family
-  (`.gitignore` "wash conformance harness" block).
-
----
+Recommended changes to make this repo easier for AI coding agents to understand,
+navigate, and safely modify. Every claim was checked against the file on disk;
+paths and line numbers are cited so they can be re-verified.
 
 ## Prioritized recommendations
 
@@ -45,12 +10,11 @@ fix genuine gaps; the repo is otherwise in good shape for its size and stage.
 - **Effort: S · Payoff: High**
 - Gap: the import-boundary guard (`harness/tests/test_self.py`) and the
   pytest-wrapped validators it imports are **never executed automatically**.
-  [`Makefile:16`](Makefile) defines `test: validate conformance` (no pytest), and
-  [`.github/workflows/conformance.yml`](.github/workflows/conformance.yml) runs
-  only `validate-*`/`coverage`/`run` — `grep pytest Makefile .github` returns
-  nothing. The first pass added this safety rail (its recommendation #15) but
-  left it inert, so a regression that makes `conformance` import `wash` would
-  pass CI.
+  [`Makefile:16`](../Makefile) defines `test: validate conformance` (no pytest),
+  and [`.github/workflows/conformance.yml`](../.github/workflows/conformance.yml)
+  runs only `validate-*`/`coverage`/`run` — `grep pytest Makefile .github`
+  returns nothing. A regression that makes `conformance` import `wash` would pass
+  CI.
 - First step: add a `unit` Make target and a CI step (draft below).
 
 ### 2. Add a harness glossary
@@ -60,7 +24,7 @@ fix genuine gaps; the repo is otherwise in good shape for its size and stage.
   capability, materialize, synthesized root, corpus** — is scattered across
   `harness/PLAN.md` prose with no single greppable definition list. These words
   appear in nearly every harness file and vector.
-- First step: add a `## Glossary` section to [`harness/AGENTS.md`](harness/AGENTS.md)
+- First step: add a `## Glossary` section to [`harness/AGENTS.md`](../harness/AGENTS.md)
   (draft below).
 
 ### 3. Add `impls/AGENTS.md` for adding a new implementation
@@ -70,7 +34,7 @@ fix genuine gaps; the repo is otherwise in good shape for its size and stage.
   a second implementation or wire its adapter. An agent asked to "add a Go
   implementation" would have to reverse-engineer the pattern from
   `harness/adapters/reference.toml` and `impls/reference/pyproject.toml`.
-- First step: add [`impls/AGENTS.md`](impls/AGENTS.md) (draft below).
+- First step: add [`impls/AGENTS.md`](../impls/AGENTS.md) (draft below).
 
 ### 4. Add lint / format / type-check tooling and Make targets
 - **Effort: M · Payoff: Med**
@@ -81,7 +45,7 @@ fix genuine gaps; the repo is otherwise in good shape for its size and stage.
 - First step: confirm Ruff + mypy with the maintainer (the `.gitignore` hint),
   then add config to `harness/pyproject.toml` / `impls/reference/pyproject.toml`
   and `lint`/`format`/`typecheck` Make targets. Prefer enforcing in a linter over
-  prose in `AGENTS.md`, per audit rules.
+  prose in `AGENTS.md`.
 
 ### 5. Document the Python version landscape as a gotcha
 - **Effort: S · Payoff: Low/Med**
@@ -90,21 +54,21 @@ fix genuine gaps; the repo is otherwise in good shape for its size and stage.
   (`.github/workflows/conformance.yml:15`), and the checked-in local venv is
   **3.14** (`.venv/lib/python3.14/`). An agent that hits a 3.14-only syntax or
   stdlib behavior will pass locally and break CI.
-- First step: one bullet under `## Gotchas` in [`AGENTS.md`](AGENTS.md) stating
+- First step: one bullet under `## Gotchas` in [`AGENTS.md`](../AGENTS.md) stating
   the support floor (3.11), the CI version (3.12), and that local may be newer.
   Optionally add a CI version matrix (testing change, lower priority for context).
 
-### 6. Decide whether `harness/PLAN.md` should be renamed to `DESIGN.md`
+### 6. Rename `harness/PLAN.md` to `harness/DESIGN.md`
 - **Effort: S · Payoff: Low**
-- Gap: contents were corrected (`harness/PLAN.md:9` now says "implemented
-  draft"), but the filename still reads as forward-looking planning. Carryover
-  from pass 1; needs a maintainer decision before acting.
+- Gap: the filename reads as forward-looking planning, but `harness/PLAN.md:9`
+  describes an "implemented draft" recording design contracts. Needs a maintainer
+  decision before acting.
 - First step: if maintainers agree, `git mv harness/PLAN.md harness/DESIGN.md`
   and update references in `README.md:14`, `AGENTS.md`, and `harness/AGENTS.md`.
 
 ### 7. Record PR / commit / release conventions (or confirm there are none)
 - **Effort: S · Payoff: Low**
-- Gap: [`AGENTS.md`](AGENTS.md) says no strict commit format is documented; PR
+- Gap: [`AGENTS.md`](../AGENTS.md) says no strict commit format is documented; PR
   title, branch naming, and release conventions are still unknown. Cannot be
   closed from the repo alone — see maintainer questions.
 - First step: add one short section to `AGENTS.md` once the convention (if any)
@@ -127,8 +91,8 @@ rail that currently does nothing.
 
 #### Top 1 — Make target + CI step
 
-Add to [`Makefile`](Makefile) (and include `unit` in the `test` aggregate so the
-documented "run the tests" command actually runs them):
+Add to [`Makefile`](../Makefile) (and include `unit` in the `test` aggregate so
+the documented "run the tests" command actually runs them):
 
 ```makefile
 .PHONY: install validate test unit conformance coverage smoke-reference
@@ -140,7 +104,7 @@ test: validate unit conformance
 ```
 
 Add a step to the `validate` job in
-[`.github/workflows/conformance.yml`](.github/workflows/conformance.yml) (the
+[`.github/workflows/conformance.yml`](../.github/workflows/conformance.yml) (the
 `[dev]` extra already installs pytest, so no new install is needed):
 
 ```yaml
@@ -227,6 +191,3 @@ treats yours exactly as it treats a third-party server.
   floor, or is 3.12 the only supported runtime?
 - Should agents ever invoke `rebuild_corpus.py`, or must all root-fixture changes
   stay manual?
-- Is `repo-context-accessibility-audit.md` meant to live at the repo root
-  long-term, or move under `specs/`/`docs/` to keep the root lean?
-```
