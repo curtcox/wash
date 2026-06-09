@@ -1,0 +1,5 @@
+# comment line
+
+echo1 sh
+glob* sh
+unresolved-cmd __wash_missing_interpreter__

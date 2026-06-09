@@ -1,0 +1,40 @@
+- id: security-cors-default-absent
+  clauses: [RT-13.1-cors-default]
+  tier: SHOULD
+  root: plain-files
+  request:
+    method: GET
+    target: "/arbitrary.txt"
+    headers:
+      Origin: "http://cross-origin.invalid"
+  expect:
+    status: 200
+    header_absent: [Access-Control-Allow-Origin]
+    no_mutation: true
+
+- id: security-get-no-mutation
+  clauses: [RT-9.1-get-no-mutate]
+  tier: MUST
+  root: plain-files
+  request: { method: GET, target: "/data.json" }
+  expect:
+    status: 200
+    no_mutation: true
+
+- id: security-get-command-no-mutation
+  clauses: [RT-9.1-get-no-mutate, PP-4-implied-cat]
+  tier: MUST
+  root: commands-mf
+  request: { method: GET, target: "/identity/data.txt" }
+  expect:
+    status: 200
+    no_mutation: true
+
+- id: security-head-no-mutation
+  clauses: [RT-9.1-get-no-mutate]
+  tier: MUST
+  root: plain-files
+  request: { method: HEAD, target: "/arbitrary.txt" }
+  expect:
+    body_empty: true
+    no_mutation: true

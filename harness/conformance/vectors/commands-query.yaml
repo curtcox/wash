@@ -1,0 +1,67 @@
+- id: query-arg-basic
+  clauses: [PP-6.1-core-arg, PP-6.2-query-disables-arity]
+  tier: MUST
+  root: commands-query
+  request: { method: GET, target: "/echo1?arg=from-query" }
+  expect:
+    status: 200
+    body_exact: "argv=[from-query]\n"
+    no_mutation: true
+
+- id: query-arg-repeated
+  clauses: [PP-6.1-core-arg]
+  tier: MUST
+  root: commands-query
+  request: { method: GET, target: "/echoN?arg=a&arg=b&arg=c" }
+  expect:
+    status: 200
+    body_exact: "argv=[a|b|c]\n"
+    no_mutation: true
+
+- id: query-disables-path-arity
+  clauses: [PP-6.2-query-disables-arity, PP-5.1-arity-n]
+  tier: MUST
+  root: commands-query
+  request: { method: GET, target: "/echo2?arg=x&arg=y" }
+  expect:
+    status: 200
+    body_matches: '^argv=\[x\|y\] exists0=\d exists1=\d\n$'
+    no_mutation: true
+
+- id: query-delim-ends-at-slash
+  clauses: [PP-6-query-delim, RT-12.2-request-handling]
+  tier: MUST
+  root: commands-query
+  request: { method: GET, target: "/grep?arg=needle/jq/haystack.txt" }
+  expect:
+    status: 200
+    body_contains: "grep(needle):"
+    no_mutation: true
+
+- id: query-multi-command-raw
+  clauses: [PP-6-query-delim, PP-2-parse-algo, RT-12.2-request-handling]
+  tier: MUST
+  root: commands-query
+  request: { method: GET, target: "/grep?arg=bravo/jq?arg=.x/data.txt" }
+  expect:
+    status: 200
+    body_contains: "grep(bravo):"
+    no_mutation: true
+
+- id: query-arg-on-noncommand-400
+  clauses: [PP-6.3-arg-noncmd-400, RT-15.2-invalid-parse]
+  tier: MUST
+  root: commands-query
+  request: { method: GET, target: "/grep/foo?arg=needle" }
+  expect:
+    status: 400
+    no_mutation: true
+
+- id: query-arg-on-literal-segment-400
+  clauses: [PP-6.3-arg-noncmd-400]
+  tier: MUST
+  root: commands-query
+  request: { method: GET, target: "/grep/-i?arg=needle/file.txt" }
+  expect:
+    status: 400
+    no_mutation: true

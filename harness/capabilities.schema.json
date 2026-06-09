@@ -1,0 +1,215 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://wash.dev/schemas/capabilities.schema.json",
+  "title": "wash capability manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "spec_version",
+    "origin_form",
+    "directory_listing",
+    "default_index_files",
+    "synthesized_resources",
+    "mime",
+    "options_cors",
+    "symlink_policy",
+    "case_sensitive_lookup",
+    "execution_metadata_headers",
+    "error_body_formats",
+    "max_error_body_bytes",
+    "writes_enabled",
+    "deletes_enabled",
+    "put_creates_parents",
+    "runtime_artifact_paths",
+    "interpreters",
+    "command_full_http_response"
+  ],
+  "properties": {
+    "spec_version": {
+      "type": "string",
+      "const": "1"
+    },
+    "origin_form": {
+      "type": "string",
+      "pattern": "^http://[^/:?#\\[\\]@]+$"
+    },
+    "cross_origin_probe": {
+      "type": "string",
+      "format": "uri"
+    },
+    "directory_listing": { "type": "boolean" },
+    "default_index_files": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/safe_filename" }
+    },
+    "synthesized_resources": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["enabled", "fixtures"],
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "fixtures": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/synthesized_fixture" }
+        }
+      }
+    },
+    "mime": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["inference", "map", "default"],
+      "properties": {
+        "inference": {
+          "type": "string",
+          "enum": ["by-extension", "none"]
+        },
+        "map": {
+          "type": "object",
+          "additionalProperties": { "type": "string" }
+        },
+        "default": { "type": "string" }
+      }
+    },
+    "options_cors": {
+      "type": "string",
+      "enum": ["implementation-defined", "disabled"]
+    },
+    "symlink_policy": {
+      "type": "string",
+      "enum": ["reject-escaping", "follow", "unsupported"]
+    },
+    "case_sensitive_lookup": { "type": "boolean" },
+    "execution_metadata_headers": { "type": "boolean" },
+    "error_body_formats": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": ["text/plain", "application/json"]
+      },
+      "uniqueItems": true
+    },
+    "max_error_body_bytes": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "writes_enabled": { "type": "boolean" },
+    "deletes_enabled": { "type": "boolean" },
+    "put_creates_parents": { "type": "boolean" },
+    "runtime_artifact_paths": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/root_relative_path" }
+    },
+    "interpreters": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "minItems": 1,
+      "uniqueItems": true
+    },
+    "command_full_http_response": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["enabled"],
+      "properties": {
+        "enabled": { "type": "boolean" }
+      }
+    }
+  },
+  "$defs": {
+    "safe_filename": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^(?![./\\\\])([^/\\\\\\x00-\\x1f\\x7f]+)$"
+    },
+    "root_relative_path": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^(?![/\\\\])(?!.*(?:^|/)(?:\\.|\\.\\.)[/\\\\])([^\\\\\\x00-\\x1f\\x7f]+)$"
+    },
+    "expect_block": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "status": { "type": "integer", "minimum": 100, "maximum": 599 },
+        "status_any": {
+          "type": "array",
+          "items": { "type": "integer", "minimum": 100, "maximum": 599 },
+          "minItems": 1
+        },
+        "status_class": {
+          "type": "string",
+          "enum": ["success", "non_error", "client_error", "server_error"]
+        },
+        "one_of": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/expect_block" },
+          "minItems": 2
+        },
+        "body_exact": { "type": "string" },
+        "body_contains": { "type": "string" },
+        "body_not_contains": { "type": "string" },
+        "body_matches": { "type": "string" },
+        "body_base64": { "type": "string" },
+        "body_empty": { "type": "boolean", "const": true },
+        "header": {
+          "type": "object",
+          "additionalProperties": {
+            "oneOf": [
+              { "type": "string" },
+              { "type": "array", "items": { "type": "string" } }
+            ]
+          }
+        },
+        "header_present": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "header_absent": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "header_matches": {
+          "type": "object",
+          "additionalProperties": { "type": "string" }
+        },
+        "content_type": { "type": "string" },
+        "no_mutation": { "type": "boolean", "const": true },
+        "mutation": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["path", "action"],
+          "properties": {
+            "path": { "$ref": "#/$defs/root_relative_path" },
+            "action": {
+              "type": "string",
+              "enum": ["created", "replaced", "deleted"]
+            },
+            "bytes": { "type": "string" },
+            "bytes_base64": { "type": "string" }
+          }
+        },
+        "when_writes_disabled": { "$ref": "#/$defs/expect_block" },
+        "when_deletes_disabled": { "$ref": "#/$defs/expect_block" },
+        "pipeline_header": { "type": "string" },
+        "error_body": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "contains": { "type": "array", "items": { "type": "string" } },
+            "field_present": { "type": "array", "items": { "type": "string" } }
+          }
+        }
+      }
+    },
+    "synthesized_fixture": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "root", "target", "expect"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "root": { "type": "string", "minLength": 1 },
+        "target": { "type": "string", "minLength": 1 },
+        "expect": { "$ref": "#/$defs/expect_block" }
+      }
+    }
+  }
+}

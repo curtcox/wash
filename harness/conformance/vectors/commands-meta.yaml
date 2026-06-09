@@ -1,0 +1,82 @@
+- id: meta-methods-get-allowed
+  clauses: [PP-5.7-method-all-stages]
+  tier: MUST
+  root: commands-meta
+  request: { method: GET, target: "/getpost/data.txt" }
+  expect:
+    status: 200
+    body_contains: "getpost"
+    no_mutation: true
+
+- id: meta-methods-post-allowed
+  clauses: [PP-5.7-method-all-stages, RT-13.2-mutating-methods]
+  tier: MUST
+  root: commands-meta
+  request:
+    method: POST
+    target: "/getpost/data.txt"
+    body_exact: "line\n"
+  expect:
+    status: 200
+    body_contains: "getpost"
+
+- id: meta-mime-final-stage
+  clauses: [PP-5.8-mime-final]
+  tier: MUST
+  root: commands-meta
+  request: { method: GET, target: "/typed/data.txt" }
+  expect:
+    status: 200
+    content_type: text/plain
+    body_contains: "typed"
+    no_mutation: true
+
+- id: meta-mime-ignored-mid-pipeline
+  clauses: [PP-5.8-mime-final]
+  tier: MUST
+  root: commands-meta
+  request: { method: GET, target: "/typed-mid/identity/data.txt" }
+  expect:
+    status: 200
+    body_contains: "identity():"
+    no_mutation: true
+
+- id: meta-stderr-discard
+  clauses: [PP-5.9-stderr-field]
+  tier: MUST
+  root: commands-meta
+  request: { method: GET, target: "/stderr-discard/noisy/data.txt" }
+  expect:
+    status: 200
+    body_contains: "out:"
+    body_not_contains: "err:"
+    no_mutation: true
+
+- id: meta-stderr-merge
+  clauses: [PP-5.9-stderr-field, PP-8-stderr-prefix]
+  tier: MUST
+  root: commands-meta
+  request: { method: GET, target: "/stderr-merge/noisy/data.txt" }
+  expect:
+    status: 200
+    body_contains: "err:"
+    no_mutation: true
+
+- id: meta-exit-custom-map
+  clauses: [PP-5.4-exit-map, RT-15.3-exit-status, RT-15.6-cmd-http-errors]
+  tier: MUST
+  root: commands-meta
+  request: { method: GET, target: "/exit-mapped" }
+  expect:
+    status: 418
+    body_contains: "exit:"
+
+- id: meta-parse-mode-raw
+  clauses: [PP-5.7-parse-raw, RT-10.7-url-expr]
+  tier: MUST
+  root: commands-meta
+  request: { method: GET, target: "/explain/hello%2Fworld/extra" }
+  expect:
+    status: 200
+    body_exact: "hello%2Fworld/extra"
+    no_mutation: true

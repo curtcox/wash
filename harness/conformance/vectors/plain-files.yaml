@@ -1,0 +1,94 @@
+- id: plain-literal-arbitrary
+  clauses: [RT-6.1-literal-file, RT-9.1-get-no-mutate]
+  tier: MUST
+  root: plain-files
+  request: { method: GET, target: "/arbitrary.txt" }
+  expect:
+    status: 200
+    body_exact: "arbitrary plain file content"
+    no_mutation: true
+
+- id: plain-literal-nested
+  clauses: [RT-6.1-literal-file, PP-9.1-slash-collapse]
+  tier: MUST
+  root: plain-files
+  request: { method: GET, target: "/nested/path/file.txt" }
+  expect:
+    status: 200
+    body_exact: "nested path file content"
+    no_mutation: true
+
+- id: plain-literal-dotfile
+  clauses: [RT-6.1-literal-file]
+  tier: MUST
+  root: plain-files
+  request: { method: GET, target: "/.dotfile" }
+  expect:
+    status: 200
+    body_contains: "dot"
+    no_mutation: true
+
+- id: plain-slash-collapse
+  clauses: [PP-9.1-slash-collapse, RT-12.2-request-handling]
+  tier: MUST
+  root: plain-files
+  request: { method: GET, target: "///arbitrary.txt" }
+  expect:
+    status: 200
+    body_exact: "arbitrary plain file content"
+    no_mutation: true
+
+- id: plain-trailing-q-resource-query
+  clauses: [PP-9.1-trailing-q]
+  tier: MUST
+  root: plain-files
+  request: { method: GET, target: "/arbitrary.txt?download=1" }
+  expect:
+    status: 200
+    body_exact: "arbitrary plain file content"
+    no_mutation: true
+
+- id: plain-literal-q-filename
+  clauses: [PP-9.1-trailing-q, RT-6.1-literal-file]
+  tier: MUST
+  root: plain-files
+  request: { method: GET, target: "/literal%3Fq.txt" }
+  expect:
+    status: 200
+    body_contains: "literal"
+    no_mutation: true
+
+- id: plain-mime-json
+  clauses: [RT-6.1-literal-file]
+  tier: MUST
+  root: plain-files
+  requires_capability:
+    all:
+      - path: mime.inference
+        equals: by-extension
+      - path: mime.map
+        matches_key: ".json"
+  request: { method: GET, target: "/data.json" }
+  expect:
+    status: 200
+    body_exact: '{"sample":true,"name":"data"}'
+    content_type: application/json
+    no_mutation: true
+
+- id: plain-root-escape-parent
+  clauses: [RT-12.2-root-escape]
+  tier: MUST
+  root: plain-files
+  request: { method: GET, target: "/../arbitrary.txt" }
+  expect:
+    status_any: [400, 404]
+    no_mutation: true
+
+- id: plain-root-escape-encoded
+  clauses: [RT-12.2-root-escape, PP-9.1-invalid-segment]
+  tier: MUST
+  root: plain-files
+  request: { method: GET, target: "/%2e%2e/arbitrary.txt" }
+  expect:
+    status_any: [400, 404]
+    no_mutation: true

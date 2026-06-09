@@ -1,0 +1,37 @@
+- id: case-sensitive-upper
+  clauses: [RT-R7-case]
+  tier: optional
+  root: case
+  requires_capability:
+    path: case_sensitive_lookup
+    equals: true
+  request: { method: GET, target: "/Readme" }
+  expect:
+    status: 200
+    body_exact: "CASE-UPPER\n"
+    no_mutation: true
+
+- id: case-sensitive-lower
+  clauses: [RT-R7-case]
+  tier: optional
+  root: case
+  requires_capability:
+    path: case_sensitive_lookup
+    equals: true
+  request: { method: GET, target: "/readme" }
+  expect:
+    status: 200
+    body_exact: "case-lower\n"
+    no_mutation: true
+
+- id: case-insensitive-consistent
+  clauses: [RT-R7-case]
+  tier: optional
+  root: case
+  requires_capability:
+    path: case_sensitive_lookup
+    equals: false
+  request: { method: GET, target: "/README" }
+  expect:
+    status_class: non_error
+    no_mutation: true

@@ -1,0 +1,59 @@
+- id: arity1-single-segment
+  clauses: [PP-5.1-arity-n, RT-10.5-multi-resource]
+  tier: MUST
+  root: commands-arity
+  request: { method: GET, target: "/echo1/alpha" }
+  expect:
+    status: 200
+    body_exact: "argv=[alpha]\n"
+    no_mutation: true
+
+- id: arity2-two-segments
+  clauses: [PP-5.1-arity-n, RT-10.5-multi-resource, RT-12.3-cwd-root]
+  tier: MUST
+  root: commands-arity
+  request: { method: GET, target: "/echo2/alpha/beta" }
+  expect:
+    status: 200
+    body_matches: '^argv=\[alpha\|beta\] exists0=\d exists1=\d\n$'
+    no_mutation: true
+
+- id: arity-star-rest
+  clauses: [PP-5.2-arity-star]
+  tier: MUST
+  root: commands-arity
+  request: { method: GET, target: "/echoN/a/b/c" }
+  expect:
+    status: 200
+    body_exact: "argv=[a|b|c]\n"
+    no_mutation: true
+
+- id: arity1-encoded-slash-in-arg
+  clauses: [PP-5.1-arity-n, RT-12.2-request-handling]
+  tier: MUST
+  root: commands-arity
+  request: { method: GET, target: "/echo1/a%2Fb/tail" }
+  expect:
+    status: 200
+    body_exact: "argv=[a/b]\n"
+    no_mutation: true
+
+- id: arity-args-before-suffix
+  clauses: [PP-9.3-args-before-suffix, PP-4-implied-cat, RT-10.5-multi-resource]
+  tier: MUST
+  root: commands-arity
+  request: { method: GET, target: "/echo2/alpha/data.txt" }
+  expect:
+    status: 200
+    body_matches: '^argv=\[alpha\|data\.txt\] exists0=0 exists1=1\n$'
+    no_mutation: true
+
+- id: arity2-file-existence-check
+  clauses: [RT-12.3-cwd-root]
+  tier: MUST
+  root: commands-arity
+  request: { method: GET, target: "/echo2/data.txt/missing.txt" }
+  expect:
+    status: 200
+    body_matches: '^argv=\[data\.txt\|missing\.txt\] exists0=1 exists1=0\n$'
+    no_mutation: true

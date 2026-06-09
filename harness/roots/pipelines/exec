@@ -1,0 +1,5 @@
+cat sh
+jq sh
+grep sh
+filter sh
+count sh

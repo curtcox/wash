@@ -1,0 +1,35 @@
+- id: empty-root-valid-404
+  clauses: [RT-4.2-root-valid, RT-15.1-not-found, PP-10.2-404]
+  tier: MUST
+  root: empty
+  request: { method: GET, target: "/anything" }
+  expect:
+    status: 404
+    no_mutation: true
+
+- id: empty-root-slash-404
+  clauses: [RT-4.2-root-valid, PP-9.1-slash-collapse]
+  tier: MUST
+  root: empty
+  request: { method: GET, target: "//missing//path" }
+  expect:
+    status: 404
+    no_mutation: true
+
+- id: empty-root-nested-404
+  clauses: [RT-6.4-missing-path, PP-10.2-404]
+  tier: MUST
+  root: empty
+  request: { method: GET, target: "/a/b/c" }
+  expect:
+    status: 404
+    no_mutation: true
+
+- id: empty-root-command-404
+  clauses: [RT-15.1-not-found]
+  tier: MUST
+  root: empty
+  request: { method: GET, target: "/cat/file.txt" }
+  expect:
+    status: 404
+    no_mutation: true

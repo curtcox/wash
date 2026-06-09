@@ -1,0 +1,4 @@
+echo1 sh
+grep sh
+jq sh
+&cmd sh

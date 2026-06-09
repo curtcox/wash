@@ -1,0 +1,39 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "wash-conformance"
+version = "0.1.0"
+description = "Language-neutral conformance harness for wash implementations"
+readme = "PLAN.md"
+requires-python = ">=3.11"
+dependencies = [
+    "pytest>=7.4",
+    "pyyaml>=6.0",
+    "jsonschema>=4.20",
+    "tomli>=2.0; python_version < '3.11'",
+]
+
+[project.optional-dependencies]
+dev = ["pytest-xdist>=3.5"]
+
+[project.scripts]
+wash-conformance = "conformance.cli:main"
+
+[project.entry-points.pytest11]
+wash_conformance = "conformance.pytest_plugin"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["conformance*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+markers = [
+    "conformance: wash conformance harness integration tests",
+    "must: MUST-tier spec clause vectors",
+    "should: SHOULD-tier spec clause vectors",
+    "optional: optional/implementation-defined vectors",
+]

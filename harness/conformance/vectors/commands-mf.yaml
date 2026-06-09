@@ -1,0 +1,69 @@
+- id: mf-implied-cat-identity
+  clauses: [PP-4-implied-cat, PP-2-parse-algo]
+  tier: MUST
+  root: commands-mf
+  request: { method: GET, target: "/identity/data.txt" }
+  expect:
+    status: 200
+    body_exact: |
+      identity():alpha
+      identity():bravo
+      identity():charlie
+    no_mutation: true
+
+- id: mf-arity0-closed-stdin
+  clauses: [PP-4-arity0-default, PP-5.3-input-stdout]
+  tier: MUST
+  root: commands-mf
+  request: { method: GET, target: "/identity" }
+  expect:
+    status: 200
+    body_exact: ""
+    no_mutation: true
+
+- id: mf-pipeline-two-stage
+  clauses: [PP-2-parse-algo, PP-4-implied-cat]
+  tier: MUST
+  root: commands-mf
+  request: { method: GET, target: "/filter/bravo/identity/data.txt" }
+  expect:
+    status: 200
+    body_exact: "filter(bravo):identity():bravo\n"
+    no_mutation: true
+
+- id: mf-pipeline-three-stage
+  clauses: [PP-2-parse-algo]
+  tier: MUST
+  root: commands-mf
+  request: { method: GET, target: "/cat/filter/bravo/identity/data.txt" }
+  expect:
+    status: 200
+    body_exact: "cat():filter(bravo):identity():bravo\n"
+    no_mutation: true
+
+- id: mf-path-args-400
+  clauses: [PP-13.1-mf-path-args, RT-10.4-invalid-parse, RT-15.2-invalid-parse]
+  tier: MUST
+  root: commands-mf
+  request: { method: GET, target: "/identity/extra/data.txt" }
+  expect:
+    status: 400
+    no_mutation: true
+
+- id: mf-multi-path-args-400
+  clauses: [PP-13.2-mf-multi-path-args, RT-15.2-invalid-parse]
+  tier: MUST
+  root: commands-mf
+  request: { method: GET, target: "/identity/grep/needle/data.txt" }
+  expect:
+    status: 400
+    no_mutation: true
+
+- id: mf-mid-noncmd-400
+  clauses: [PP-7-mid-noncmd-400, RT-10.4-invalid-parse]
+  tier: MUST
+  root: commands-mf
+  request: { method: GET, target: "/identity/middle/grep/bravo/data.txt" }
+  expect:
+    status: 400
+    no_mutation: true

@@ -1,0 +1,9 @@
+name        = "reference"
+start       = ["python3", "-m", "wash.server", "--root", "{root}", "--port", "{port}"]
+stop        = "SIGTERM"
+port_mode   = "assigned"
+ready       = { type = "tcp" }
+ready_timeout_sec = 10
+cwd         = "impls/reference"
+env         = {}
+capabilities = "impls/reference/wash.capabilities.json"

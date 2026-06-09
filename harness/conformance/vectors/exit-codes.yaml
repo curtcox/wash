@@ -1,0 +1,35 @@
+- id: exit-default-nonzero-400
+  clauses: [RT-15.3-exit-status, PP-5.4-exit-map]
+  tier: MUST
+  root: exit-codes
+  request: { method: GET, target: "/exit1" }
+  expect:
+    status: 400
+    body_contains: "exit:1"
+
+- id: exit-custom-map-status
+  clauses: [PP-5.4-exit-map, RT-15.6-cmd-http-errors]
+  tier: MUST
+  root: exit-codes
+  request: { method: GET, target: "/exit42-mapped" }
+  expect:
+    status: 451
+    body_contains: "exit:42"
+
+- id: exit-pipefail-first-wins
+  clauses: [PP-5.4-exit-map, RT-15.3-exit-status]
+  tier: MUST
+  root: exit-codes
+  request: { method: GET, target: "/exit1/exit2" }
+  expect:
+    status: 400
+    body_contains: "exit:1"
+
+- id: exit-pipefail-second-ignored
+  clauses: [PP-5.4-exit-map]
+  tier: MUST
+  root: exit-codes
+  request: { method: GET, target: "/identity/exit2" }
+  expect:
+    status: 400
+    body_contains: "exit:2"

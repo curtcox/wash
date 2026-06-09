@@ -1,0 +1,39 @@
+- id: pipe-jq-grep-single-line
+  clauses: [PP-2-parse-algo, PP-4-implied-cat]
+  tier: MUST
+  root: pipelines
+  request: { method: GET, target: "/jq/grep/bravo/oneline.txt" }
+  expect:
+    status: 200
+    body_exact: "jq():grep(bravo):bravo\n"
+    no_mutation: true
+
+- id: pipe-three-stage-order
+  clauses: [PP-2-parse-algo]
+  tier: MUST
+  root: pipelines
+  request: { method: GET, target: "/cat/jq/grep/bravo/data.txt" }
+  expect:
+    status: 200
+    body_exact: "cat():jq():grep(bravo):bravo\n"
+    no_mutation: true
+
+- id: pipe-filter-count
+  clauses: [PP-2-parse-algo, PP-4-implied-cat]
+  tier: MUST
+  root: pipelines
+  request: { method: GET, target: "/count/filter/bravo/data.txt" }
+  expect:
+    status: 200
+    body_exact: "count():1\n"
+    no_mutation: true
+
+- id: pipe-wrong-order-detectable
+  clauses: [PP-2-parse-algo]
+  tier: MUST
+  root: pipelines
+  request: { method: GET, target: "/grep/bravo/jq/data.txt" }
+  expect:
+    status: 200
+    body_exact: "grep(bravo):jq():bravo\n"
+    no_mutation: true

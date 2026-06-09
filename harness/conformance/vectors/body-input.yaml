@@ -1,0 +1,56 @@
+- id: body-post-stdin
+  clauses: [RT-10.6-request-body, PP-5.3-input-stdout]
+  tier: MUST
+  root: body-input
+  request:
+    method: POST
+    target: "/transform"
+    body_exact: "posted-line\n"
+  expect:
+    status: 200
+    body_exact: "transform():posted-line\n"
+
+- id: body-suffix-wins-over-body
+  clauses: [RT-10.6-request-body, PP-4-implied-cat]
+  tier: MUST
+  root: body-input
+  request:
+    method: POST
+    target: "/transform/data.txt"
+    body_exact: "should-not-win\n"
+  expect:
+    status: 200
+    body_contains: "transform():alpha"
+    body_not_contains: "should-not-win"
+
+- id: body-arity-star-suppresses-suffix
+  clauses: [PP-5.2-arity-star, RT-10.6-request-body]
+  tier: MUST
+  root: body-input
+  request:
+    method: POST
+    target: "/echoN/only/argv/data.txt"
+    body_exact: "body-fed\n"
+  expect:
+    status: 200
+    body_exact: "argv=[only|argv|data.txt]\n"
+
+- id: body-closed-empty-stdin
+  clauses: [PP-4-arity0-default, PP-5.3-input-stdout]
+  tier: MUST
+  root: body-input
+  request: { method: GET, target: "/transform" }
+  expect:
+    status: 200
+    body_exact: ""
+    no_mutation: true
+
+- id: body-get-no-mutation
+  clauses: [RT-9.1-get-no-mutate]
+  tier: MUST
+  root: body-input
+  request: { method: GET, target: "/transform/data.txt" }
+  expect:
+    status: 200
+    body_contains: "transform():"
+    no_mutation: true

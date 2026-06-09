@@ -1,0 +1,78 @@
+- id: mut-put-replace-literal
+  clauses: [RT-9.2-put-literal, RT-13.2-mutating-methods]
+  tier: MUST
+  root: mutation
+  request:
+    method: PUT
+    target: "/writable/existing.txt"
+    body_exact: "replaced-bytes\n"
+  expect:
+    status: 200
+    mutation:
+      path: writable/existing.txt
+      action: replaced
+      bytes: "replaced-bytes\n"
+    when_writes_disabled:
+      status_any: [403, 405]
+      no_mutation: true
+
+- id: mut-put-create-literal
+  clauses: [RT-9.2-put-literal]
+  tier: MUST
+  root: mutation
+  request:
+    method: PUT
+    target: "/writable/newfile.txt"
+    body_exact: "created-bytes\n"
+  expect:
+    status: 200
+    mutation:
+      path: writable/newfile.txt
+      action: created
+      bytes: "created-bytes\n"
+    when_writes_disabled:
+      status_any: [403, 405]
+      no_mutation: true
+
+- id: mut-delete-literal
+  clauses: [RT-9.4-delete-literal, RT-13.2-mutating-methods]
+  tier: MUST
+  root: mutation
+  request:
+    method: DELETE
+    target: "/writable/todelete.txt"
+  expect:
+    status: 200
+    mutation:
+      path: writable/todelete.txt
+      action: deleted
+    when_deletes_disabled:
+      status_any: [403, 405]
+      no_mutation: true
+
+- id: mut-post-plain-405
+  clauses: [RT-9.3-post-plain-405]
+  tier: MUST
+  root: mutation
+  request:
+    method: POST
+    target: "/writable/existing.txt"
+    body_exact: "post-body\n"
+  expect:
+    status: 405
+    no_mutation: true
+
+- id: mut-post-command-write
+  clauses: [RT-13.2-mutating-methods]
+  tier: MUST
+  root: mutation
+  request:
+    method: POST
+    target: "/sort/writable%2Fsorted.txt"
+    body_exact: "zebra\nalpha\n"
+  expect:
+    status: 200
+    mutation:
+      path: writable/sorted.txt
+      action: created
+      bytes: "alpha\nzebra\n"

@@ -1,0 +1,66 @@
+# Byte-compiled / optimized Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+.venv/
+venv/
+# Do not add ENV/ here: on macOS (case-insensitive FS) it also ignores harness
+# corpus fixture directories named env/ (e.g. harness/roots/*/env/path).
+
+# Distribution / packaging
+*.egg-info/
+.eggs/
+dist/
+build/
+*.egg
+pip-wheel-metadata/
+
+# Testing
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+coverage.xml
+
+# Type checkers / linters
+.mypy_cache/
+.ruff_cache/
+.pytype/
+
+# Secrets / local environment
+.env
+.env.*
+!.env.example
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editors
+*.swp
+*~
+.idea/
+.vscode/
+.cursor/
+
+# Local tool configuration
+.claude/
+
+# wash conformance harness
+# Mechanical exit0..exit255 templates in roots/_lib (trivial printf+exit scripts).
+# Track the core fixture commands (cat, grep, echo*, _common.sh, etc.); regenerate
+# exits on demand via conformance.rootcorpus.ensure_exit_lib().
+harness/roots/_lib/exit*.sh
+harness/roots/_lib/exit*.py
+
+# Accidental copies of harness fixture scripts at repo root
+/count
+/merged
+/noisy
+/post-mutate
+/sort
+/writeable

@@ -1,0 +1,3 @@
+#!/bin/sh
+printf 'exit:1\n'
+exit 1

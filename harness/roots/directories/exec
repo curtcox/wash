@@ -1,0 +1,3 @@
+dirprobe sh
+grep sh
+wc sh

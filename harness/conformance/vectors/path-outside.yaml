@@ -1,0 +1,29 @@
+- id: path-outside-command-works
+  clauses: [RT-7.1-command-path]
+  tier: MUST
+  root: path-outside
+  request: { method: GET, target: "/echo1/from-shared" }
+  expect:
+    status: 200
+    body_exact: "argv=[from-shared]\n"
+    no_mutation: true
+
+- id: path-outside-literal-still-rooted
+  clauses: [RT-12.2-root-escape, RT-6.1-literal-file]
+  tier: MUST
+  root: path-outside
+  request: { method: GET, target: "/../outside-secret.txt" }
+  expect:
+    status_any: [400, 404]
+    body_not_contains: "outside-secret"
+    no_mutation: true
+
+- id: path-outside-get-no-mutation
+  clauses: [RT-9.1-get-no-mutate]
+  tier: MUST
+  root: path-outside
+  request: { method: GET, target: "/local-only.txt" }
+  expect:
+    status: 200
+    body_contains: "local"
+    no_mutation: true

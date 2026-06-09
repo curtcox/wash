@@ -1,0 +1,44 @@
+- id: stderr-unmerged-boundary
+  clauses: [PP-8-stderr-prefix, PP-5.9-stderr-field]
+  tier: MUST
+  root: stderr
+  request: { method: GET, target: "/filter/needle/noisy/data.txt" }
+  expect:
+    status: 200
+    body_contains: "filter(needle):"
+    body_not_contains: "err:"
+    no_mutation: true
+
+- id: stderr-merged-boundary
+  clauses: [PP-8-stderr-prefix, PP-5.9-stderr-field]
+  tier: MUST
+  root: stderr
+  request: { method: GET, target: "/filter/needle/&noisy/data.txt" }
+  expect:
+    status: 200
+    body_matches: 'err:'
+    body_contains: "filter(needle):"
+    no_mutation: true
+
+- id: stderr-amp-percent-encoded-name
+  clauses: [PP-8.1-amp-name]
+  tier: MUST
+  root: stderr
+  request: { method: GET, target: "/%26noisy/data.txt" }
+  expect:
+    status: 200
+    body_contains: "out:"
+    no_mutation: true
+
+- id: stderr-dirprobe-marker
+  clauses: [PP-9.4-dir-suffix]
+  tier: MUST
+  root: stderr
+  request: { method: GET, target: "/dirprobe/docs" }
+  expect:
+    one_of:
+      - status: 200
+        body_contains: "dirprobe:"
+      - status_class: client_error
+        body_not_contains: "dirprobe:"
+    no_mutation: true

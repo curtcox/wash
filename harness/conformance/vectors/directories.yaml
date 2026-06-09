@@ -1,0 +1,67 @@
+- id: dir-default-index
+  clauses: [RT-6.5-dir-index, PP-9.1-slash-collapse]
+  tier: optional
+  root: directories
+  requires_capability:
+    path: default_index_files
+    nonempty: true
+  request: { method: GET, target: "/with-index" }
+  expect:
+    status: 200
+    body_exact: "wash-fixture: default-index\n"
+    no_mutation: true
+
+- id: dir-default-index-trailing-slash
+  clauses: [PP-9.1-slash-collapse]
+  tier: MUST
+  root: directories
+  requires_capability:
+    path: default_index_files
+    nonempty: true
+  request: { method: GET, target: "/with-index/" }
+  expect:
+    status: 200
+    body_exact: "wash-fixture: default-index\n"
+    no_mutation: true
+
+- id: dir-listing-no-index
+  clauses: [RT-6.5-dir-index]
+  tier: optional
+  root: directories
+  requires_capability: directory_listing
+  request: { method: GET, target: "/no-index" }
+  expect:
+    status_class: non_error
+    no_mutation: true
+
+- id: dir-repeated-slash-collapse
+  clauses: [PP-9.1-slash-collapse]
+  tier: MUST
+  root: directories
+  request: { method: GET, target: "///docs///readme.txt" }
+  expect:
+    status: 200
+    body_contains: "readme"
+    no_mutation: true
+
+- id: dir-implied-cat-suffix
+  clauses: [PP-9.4-dir-suffix, PP-4-implied-cat]
+  tier: MUST
+  root: directories
+  request: { method: GET, target: "/dirprobe/docs" }
+  expect:
+    one_of:
+      - status: 200
+        body_contains: "dirprobe:"
+      - status_class: client_error
+        body_not_contains: "dirprobe:"
+    no_mutation: true
+
+- id: dir-no-cmd-after-traversal
+  clauses: [PP-9.2-no-cmd-in-dir, RT-15.1-not-found, PP-10.2-404]
+  tier: MUST
+  root: directories
+  request: { method: GET, target: "/docs/grep/needle/file.txt" }
+  expect:
+    status: 404
+    no_mutation: true

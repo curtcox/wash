@@ -1,0 +1,37 @@
+- id: symlink-reject-escaping
+  clauses: [RT-12.2-root-escape]
+  tier: MUST
+  root: symlinks
+  requires_capability:
+    path: symlink_policy
+    equals: reject-escaping
+  request: { method: GET, target: "/link-escape" }
+  expect:
+    status_any: [400, 403, 404]
+    body_not_contains: "outside-bytes"
+    no_mutation: true
+
+- id: symlink-follow-in-root
+  clauses: [RT-6.1-literal-file]
+  tier: optional
+  root: symlinks
+  requires_capability:
+    path: symlink_policy
+    equals: follow
+  request: { method: GET, target: "/link-ok" }
+  expect:
+    status: 200
+    no_mutation: true
+
+- id: symlink-literal-file-via-link
+  clauses: [RT-6.1-literal-file]
+  tier: optional
+  root: symlinks
+  requires_capability:
+    path: symlink_policy
+    equals: follow
+  request: { method: GET, target: "/link-to-file" }
+  expect:
+    status: 200
+    body_contains: "symlink-target"
+    no_mutation: true

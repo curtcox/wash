@@ -1,0 +1,197 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://wash.dev/schemas/vector.schema.json",
+  "title": "wash test vector",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "clauses", "tier", "root", "request", "expect"],
+  "properties": {
+    "id": { "type": "string", "minLength": 1 },
+    "clauses": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "minItems": 1
+    },
+    "tier": {
+      "type": "string",
+      "enum": ["MUST", "SHOULD", "optional"]
+    },
+    "root": { "type": "string", "minLength": 1 },
+    "timeout_means": {
+      "type": "string",
+      "enum": ["fail", "timeout"],
+      "default": "fail"
+    },
+    "requires_capability": {
+      "oneOf": [
+        { "type": "string" },
+        { "$ref": "#/$defs/capability_predicate" }
+      ]
+    },
+    "forbidden_when": { "$ref": "#/$defs/capability_predicate" },
+    "requires_interpreter": { "type": "string", "minLength": 1 },
+    "request": { "$ref": "#/$defs/request_block" },
+    "expect": { "$ref": "#/$defs/expect_block" }
+  },
+  "$defs": {
+    "request_block": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["method", "target"],
+      "properties": {
+        "method": { "type": "string", "minLength": 1 },
+        "target": { "type": "string" },
+        "headers": {
+          "type": "object",
+          "additionalProperties": { "type": "string" }
+        },
+        "body_exact": { "type": "string" },
+        "body_base64": { "type": "string" },
+        "body_file": { "type": "string" }
+      },
+      "oneOf": [
+        {
+          "not": {
+            "anyOf": [
+              { "required": ["body_exact"] },
+              { "required": ["body_base64"] },
+              { "required": ["body_file"] }
+            ]
+          }
+        },
+        { "required": ["body_exact"], "not": { "anyOf": [{ "required": ["body_base64"] }, { "required": ["body_file"] }] } },
+        { "required": ["body_base64"], "not": { "anyOf": [{ "required": ["body_exact"] }, { "required": ["body_file"] }] } },
+        { "required": ["body_file"], "not": { "anyOf": [{ "required": ["body_exact"] }, { "required": ["body_base64"] }] } }
+      ]
+    },
+    "capability_predicate": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["path"],
+          "properties": {
+            "path": { "type": "string" },
+            "equals": {},
+            "not_equals": {},
+            "present": { "type": "boolean" },
+            "absent": { "type": "boolean" },
+            "nonempty": { "type": "boolean" },
+            "contains": {},
+            "matches_key": { "type": "string" }
+          },
+          "oneOf": [
+            { "required": ["equals"] },
+            { "required": ["not_equals"] },
+            { "required": ["present"] },
+            { "required": ["absent"] },
+            { "required": ["nonempty"] },
+            { "required": ["contains"] },
+            { "required": ["matches_key"] }
+          ]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["all"],
+          "properties": {
+            "all": {
+              "type": "array",
+              "items": { "$ref": "#/$defs/capability_predicate" },
+              "minItems": 1
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["any"],
+          "properties": {
+            "any": {
+              "type": "array",
+              "items": { "$ref": "#/$defs/capability_predicate" },
+              "minItems": 1
+            }
+          }
+        }
+      ]
+    },
+    "expect_block": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "status": { "type": "integer", "minimum": 100, "maximum": 599 },
+        "status_any": {
+          "type": "array",
+          "items": { "type": "integer", "minimum": 100, "maximum": 599 },
+          "minItems": 1
+        },
+        "status_class": {
+          "type": "string",
+          "enum": ["success", "non_error", "client_error", "server_error"]
+        },
+        "one_of": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/expect_block" },
+          "minItems": 2
+        },
+        "body_exact": { "type": "string" },
+        "body_contains": { "type": "string" },
+        "body_not_contains": { "type": "string" },
+        "body_matches": { "type": "string" },
+        "body_base64": { "type": "string" },
+        "body_empty": { "type": "boolean", "const": true },
+        "head_of": { "type": "string", "minLength": 1 },
+        "header": {
+          "type": "object",
+          "additionalProperties": {
+            "oneOf": [
+              { "type": "string" },
+              { "type": "array", "items": { "type": "string" } }
+            ]
+          }
+        },
+        "header_present": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "header_absent": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "header_matches": {
+          "type": "object",
+          "additionalProperties": { "type": "string" }
+        },
+        "content_type": { "type": "string" },
+        "no_mutation": { "type": "boolean", "const": true },
+        "mutation": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["path", "action"],
+          "properties": {
+            "path": { "type": "string", "minLength": 1 },
+            "action": {
+              "type": "string",
+              "enum": ["created", "replaced", "deleted"]
+            },
+            "bytes": { "type": "string" },
+            "bytes_base64": { "type": "string" }
+          }
+        },
+        "when_writes_disabled": { "$ref": "#/$defs/expect_block" },
+        "when_deletes_disabled": { "$ref": "#/$defs/expect_block" },
+        "pipeline_header": { "type": "string" },
+        "error_body": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "contains": { "type": "array", "items": { "type": "string" } },
+            "field_present": { "type": "array", "items": { "type": "string" } }
+          }
+        }
+      },
+      "minProperties": 1
+    }
+  }
+}

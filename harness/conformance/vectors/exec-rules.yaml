@@ -1,0 +1,55 @@
+- id: exec-basename-match
+  clauses: [RT-7.2-exec-rules]
+  tier: MUST
+  root: exec-rules
+  request: { method: GET, target: "/echo1/alpha" }
+  expect:
+    status: 200
+    body_exact: "argv=[alpha]\n"
+    no_mutation: true
+
+- id: exec-glob-match
+  clauses: [RT-7.2-exec-rules]
+  tier: MUST
+  root: exec-rules
+  request: { method: GET, target: "/globmatch/beta" }
+  expect:
+    status: 200
+    body_exact: "argv=[beta]\n"
+    no_mutation: true
+
+- id: exec-first-match-wins
+  clauses: [RT-7.2-exec-rules]
+  tier: MUST
+  root: exec-rules
+  request: { method: GET, target: "/echo1/gamma" }
+  expect:
+    status: 200
+    body_exact: "argv=[gamma]\n"
+    no_mutation: true
+
+- id: exec-comment-blank-skipped
+  clauses: [RT-7.2-exec-rules]
+  tier: MUST
+  root: exec-rules
+  request: { method: GET, target: "/echo1/delta" }
+  expect:
+    status: 200
+    body_exact: "argv=[delta]\n"
+    no_mutation: true
+
+- id: exec-malformed-rule-500
+  clauses: [RT-7.2-exec-rules, PP-5.5-malformed-500, PP-10.4-500]
+  tier: MUST
+  root: exec-malformed
+  request: { method: GET, target: "/malformed-exec-cmd" }
+  expect:
+    status: 500
+
+- id: exec-unresolved-interpreter-500
+  clauses: [RT-7.2-exec-rules, RT-15.5-interpreter-fail, PP-10.4-500]
+  tier: MUST
+  root: exec-rules
+  request: { method: GET, target: "/unresolved-cmd" }
+  expect:
+    status: 500

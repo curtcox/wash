@@ -1,0 +1,309 @@
+"""Filesystem resolution, serving, and mutation."""
+
+from __future__ import annotations
+
+import os
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Literal
+from urllib.parse import unquote_to_bytes
+
+MIME_MAP: dict[str, str] = {
+    ".txt": "text/plain",
+    ".json": "application/json",
+}
+MIME_DEFAULT = "application/octet-stream"
+
+
+class PathSegmentError(Exception):
+    pass
+
+
+class RootEscapeError(Exception):
+    pass
+
+
+class SymlinkEscapeError(Exception):
+    pass
+
+
+@dataclass
+class FilesystemResource:
+    kind: Literal["file", "directory"]
+    path: Path
+    rel_path: str
+
+
+def split_raw_target(raw_target: str) -> list[str]:
+    """Split request-target on raw / before percent-decoding."""
+    if not raw_target.startswith("/"):
+        raw_target = "/" + raw_target
+    parts = raw_target.split("/")
+    segments: list[str] = []
+    for part in parts:
+        if part == "" and not segments:
+            continue
+        if part == "":
+            continue
+        segments.append(part)
+    return segments
+
+
+def percent_decode_segment(raw: str, *, for_filesystem: bool) -> str:
+    try:
+        decoded = unquote_to_bytes(raw).decode("utf-8", errors="surrogateescape")
+    except Exception as exc:
+        raise PathSegmentError(str(exc)) from exc
+    if for_filesystem and ("/" in decoded or "\x00" in decoded):
+        raise PathSegmentError("decoded / or NUL in filesystem path segment")
+    return decoded
+
+
+def normalize_path_parts(parts: list[str]) -> list[str]:
+    stack: list[str] = []
+    for part in parts:
+        if part in ("", "."):
+            continue
+        if part == "..":
+            if stack:
+                stack.pop()
+            else:
+                stack.append("..")
+            continue
+        stack.append(part)
+    return stack
+
+
+def _is_under_root(root: Path, path: Path) -> bool:
+    root_s = os.path.normpath(str(root.resolve()))
+    path_s = os.path.normpath(str(path.resolve()))
+    return path_s == root_s or path_s.startswith(root_s + os.sep)
+
+
+def _walk_under_root(
+    root: Path,
+    rel_parts: list[str],
+    *,
+    symlink_policy: str,
+    case_sensitive: bool,
+) -> Path | None:
+    root = root.resolve()
+    current = root
+    for part in normalize_path_parts(rel_parts):
+        if not current.is_dir():
+            return None
+        next_path = _lookup_child(current, part, case_sensitive=case_sensitive)
+        if next_path is None:
+            return None
+        if next_path.is_symlink():
+            target = next_path.resolve()
+            if symlink_policy == "reject-escaping" and not _is_under_root(root, target):
+                raise SymlinkEscapeError("symlink escapes root")
+            if symlink_policy == "unsupported":
+                raise SymlinkEscapeError("symlinks unsupported")
+            current = target
+        else:
+            current = next_path
+    if not _is_under_root(root, current.resolve()):
+        raise RootEscapeError("path escapes root")
+    return current
+
+
+def _lookup_child(directory: Path, name: str, *, case_sensitive: bool) -> Path | None:
+    direct = directory / name
+    if direct.exists() or direct.is_symlink():
+        return direct
+    if case_sensitive:
+        return None
+    for entry in directory.iterdir():
+        if entry.name.lower() == name.lower():
+            return entry
+    return None
+
+
+def resolve_under_root(
+    root: Path,
+    rel_parts: list[str],
+    *,
+    symlink_policy: str = "reject-escaping",
+    case_sensitive: bool = True,
+) -> Path | None:
+    if not rel_parts:
+        return root.resolve() if root.is_dir() else None
+    try:
+        return _walk_under_root(
+            root,
+            rel_parts,
+            symlink_policy=symlink_policy,
+            case_sensitive=case_sensitive,
+        )
+    except (RootEscapeError, SymlinkEscapeError, PathSegmentError):
+        return None
+
+
+def try_exact_filesystem(
+    root: Path,
+    raw_segments: list[str],
+    *,
+    symlink_policy: str = "reject-escaping",
+    case_sensitive: bool = True,
+) -> FilesystemResource | None:
+    if not raw_segments:
+        if root.is_dir():
+            return FilesystemResource("directory", root.resolve(), "")
+        return None
+
+    fs_segments = list(raw_segments)
+    last = fs_segments[-1]
+    if "?" in last:
+        name_part, query_rest = last.split("?", 1)
+        if "/" not in query_rest:
+            fs_segments[-1] = name_part
+            if fs_segments[-1] == "":
+                return None
+
+    decoded_parts: list[str] = []
+    for raw in fs_segments:
+        try:
+            decoded_parts.append(percent_decode_segment(raw, for_filesystem=True))
+        except PathSegmentError:
+            return None
+
+    try:
+        resolved = _walk_under_root(
+            root,
+            decoded_parts,
+            symlink_policy=symlink_policy,
+            case_sensitive=case_sensitive,
+        )
+    except (RootEscapeError, SymlinkEscapeError):
+        return None
+
+    if resolved is None or not resolved.exists():
+        return None
+
+    rel = resolved.resolve().relative_to(root.resolve()).as_posix()
+    if resolved.is_dir():
+        return FilesystemResource("directory", resolved, rel)
+    if resolved.is_file() or resolved.is_symlink():
+        return FilesystemResource("file", resolved, rel)
+    return None
+
+
+def infer_mime(path: Path) -> str:
+    ext = path.suffix.lower()
+    return MIME_MAP.get(ext, MIME_DEFAULT)
+
+
+def infer_mime_from_bytes(data: bytes, declared: str | None = None) -> str:
+    if declared:
+        return declared
+    if not data:
+        return "text/plain"
+    try:
+        data.decode("utf-8")
+        return "text/plain"
+    except UnicodeDecodeError:
+        return MIME_DEFAULT
+
+
+def read_file_bytes(path: Path) -> bytes:
+    return path.read_bytes()
+
+
+def directory_listing(path: Path) -> bytes:
+    lines: list[str] = []
+    for entry in sorted(path.iterdir(), key=lambda p: p.name):
+        suffix = "/" if entry.is_dir() else ""
+        lines.append(f"{entry.name}{suffix}")
+    body = "\n".join(lines)
+    if lines:
+        body += "\n"
+    return body.encode("utf-8")
+
+
+def find_index_file(path: Path, index_names: list[str]) -> Path | None:
+    for name in index_names:
+        candidate = path / name
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+def put_file(
+    root: Path,
+    rel_parts: list[str],
+    body: bytes,
+    *,
+    create_parents: bool = True,
+    symlink_policy: str = "reject-escaping",
+) -> Path:
+    root = root.resolve()
+    normalized = normalize_path_parts(rel_parts)
+    if not normalized:
+        raise RootEscapeError("cannot PUT root directory")
+
+    current = root
+    for part in normalized[:-1]:
+        current = current / part
+        if current.exists() and current.is_symlink():
+            resolved = current.resolve()
+            if symlink_policy == "reject-escaping" and not _is_under_root(root, resolved):
+                raise SymlinkEscapeError("symlink escapes root")
+        if not _is_under_root(root, current):
+            raise RootEscapeError("path escapes root")
+
+    target = current / normalized[-1]
+    if target.exists() and target.is_symlink():
+        resolved = target.resolve()
+        if symlink_policy == "reject-escaping" and not _is_under_root(root, resolved):
+            raise SymlinkEscapeError("symlink escapes root")
+    if not _is_under_root(root, target):
+        raise RootEscapeError("path escapes root")
+
+    if create_parents:
+        target.parent.mkdir(parents=True, exist_ok=True)
+    elif not target.parent.exists():
+        raise FileNotFoundError("parent directory does not exist")
+
+    target.write_bytes(body)
+    return target
+
+
+def delete_file(
+    root: Path,
+    rel_parts: list[str],
+    *,
+    symlink_policy: str = "reject-escaping",
+) -> None:
+    resolved = resolve_under_root(root, rel_parts, symlink_policy=symlink_policy)
+    if resolved is None or not resolved.is_file():
+        raise FileNotFoundError("file not found")
+    resolved.unlink()
+
+
+def literal_path_parts_from_raw(raw_segments: list[str]) -> list[str]:
+    return [percent_decode_segment(raw, for_filesystem=True) for raw in raw_segments]
+
+
+def implied_cat_bytes(
+    root: Path,
+    raw_segments: list[str],
+    *,
+    symlink_policy: str = "reject-escaping",
+    case_sensitive: bool = True,
+) -> bytes:
+    if not raw_segments:
+        return b""
+    fs_parts = [percent_decode_segment(raw, for_filesystem=True) for raw in raw_segments]
+    resolved = resolve_under_root(
+        root,
+        fs_parts,
+        symlink_policy=symlink_policy,
+        case_sensitive=case_sensitive,
+    )
+    if resolved is None:
+        raise FileNotFoundError("input suffix not found")
+    if resolved.is_dir():
+        raise IsADirectoryError("input suffix is a directory")
+    return resolved.read_bytes()

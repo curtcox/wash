@@ -1,0 +1,85 @@
+- id: prec-single-segment-file-wins
+  clauses: [RT-6.2-precedence, PP-2-parse-algo]
+  tier: MUST
+  root: precedence
+  request: { method: GET, target: "/wc" }
+  expect:
+    status: 200
+    body_exact: "i am a regular file named wc"
+    no_mutation: true
+
+- id: prec-direct-command-file
+  clauses: [RT-6.3-direct-cmd-file]
+  tier: MUST
+  root: precedence
+  request: { method: GET, target: "/bin/wc" }
+  expect:
+    status: 200
+    body_contains: "# wash-fixture: linecount"
+    no_mutation: true
+
+- id: prec-file-over-command-same-name
+  clauses: [RT-6.2-precedence, PP-9.3-args-before-suffix]
+  tier: MUST
+  root: precedence
+  request: { method: GET, target: "/grep/docs/file.txt" }
+  expect:
+    status: 200
+    body_exact: "served as a file, not a pipeline"
+    no_mutation: true
+
+- id: prec-command-over-file-of-same-name
+  clauses: [RT-6.2-precedence, PP-4-implied-cat]
+  tier: MUST
+  root: precedence
+  request: { method: GET, target: "/wc/haystack.json" }
+  expect:
+    status: 200
+    body_matches: '^\s*3\s*$'
+    no_mutation: true
+
+- id: prec-implied-cat-pipeline
+  clauses: [PP-4-implied-cat, PP-2-parse-algo]
+  tier: MUST
+  root: precedence
+  request: { method: GET, target: "/wc/grep/bravo/haystack.json" }
+  expect:
+    status: 200
+    body_matches: '^\s*1\s*$'
+    no_mutation: true
+
+- id: prec-missing-resource-404
+  clauses: [RT-6.4-missing-path, RT-15.1-not-found, PP-10.2-404]
+  tier: MUST
+  root: precedence
+  request: { method: GET, target: "/no-such-resource" }
+  expect:
+    status: 404
+    no_mutation: true
+
+- id: prec-missing-suffix-404
+  clauses: [RT-6.4-missing-path, PP-10.2-404]
+  tier: MUST
+  root: precedence
+  request: { method: GET, target: "/wc/missing-input.json" }
+  expect:
+    status: 404
+    no_mutation: true
+
+- id: prec-unknown-command-404
+  clauses: [RT-15.1-not-found, PP-10.2-404]
+  tier: MUST
+  root: precedence
+  request: { method: GET, target: "/notacommand/data.txt" }
+  expect:
+    status: 404
+    no_mutation: true
+
+- id: prec-parse-terminal-no-synth
+  clauses: [PP-9.5-parse-terminal, RT-10.4-invalid-parse, RT-15.2-invalid-parse]
+  tier: MUST
+  root: precedence
+  request: { method: GET, target: "/grep/-i?arg=needle/missing.json" }
+  expect:
+    status: 400
+    no_mutation: true

@@ -1,0 +1,87 @@
+- id: malformed-bad-arity
+  clauses: [PP-5.5-malformed-500, PP-10.4-500]
+  tier: MUST
+  root: meta-malformed
+  request: { method: GET, target: "/bad-arity" }
+  expect:
+    status: 500
+
+- id: malformed-bad-exit-pair
+  clauses: [PP-5.5-malformed-500, PP-10.4-500]
+  tier: MUST
+  root: meta-malformed
+  request: { method: GET, target: "/bad-exit" }
+  expect:
+    status: 500
+
+- id: malformed-bad-mime
+  clauses: [PP-5.5-malformed-500, PP-10.4-500]
+  tier: MUST
+  root: meta-malformed
+  request: { method: GET, target: "/bad-mime" }
+  expect:
+    status: 500
+
+- id: malformed-bad-stderr
+  clauses: [PP-5.5-malformed-500, PP-10.4-500]
+  tier: MUST
+  root: meta-malformed
+  request: { method: GET, target: "/bad-stderr" }
+  expect:
+    status: 500
+
+- id: malformed-mutates-get
+  clauses: [PP-5.7-mutates-get-invalid, PP-5.5-malformed-500, PP-10.4-500]
+  tier: MUST
+  root: meta-malformed
+  request: { method: GET, target: "/mutates-get" }
+  expect:
+    status: 500
+
+- id: malformed-input-file-reserved
+  clauses: [PP-5.5-malformed-500, PP-5.3-input-stdout, PP-10.4-500]
+  tier: MUST
+  root: meta-malformed
+  request: { method: GET, target: "/input-file" }
+  expect:
+    status: 500
+
+- id: malformed-input-none-reserved
+  clauses: [PP-5.5-malformed-500, PP-5.3-input-stdout, PP-10.4-500]
+  tier: MUST
+  root: meta-malformed
+  request: { method: GET, target: "/input-none" }
+  expect:
+    status: 500
+
+- id: malformed-output-file-reserved
+  clauses: [PP-5.5-malformed-500, PP-5.3-input-stdout, PP-10.4-500]
+  tier: MUST
+  root: meta-malformed
+  request: { method: GET, target: "/output-file" }
+  expect:
+    status: 500
+
+- id: malformed-arity-range-bounded
+  clauses: [PP-5.5-malformed-500, PP-10.4-500]
+  tier: MUST
+  root: meta-malformed
+  request: { method: GET, target: "/arity-range-bounded" }
+  expect:
+    status: 500
+
+- id: malformed-arity-range-star
+  clauses: [PP-5.5-malformed-500, PP-10.4-500]
+  tier: MUST
+  root: meta-malformed
+  request: { method: GET, target: "/arity-range-star" }
+  expect:
+    status: 500
+
+- id: malformed-parse-raw-not-leftmost
+  clauses: [PP-5.5-malformed-500, PP-5.7-parse-raw, PP-10.4-500]
+  tier: MUST
+  root: meta-malformed
+  request: { method: GET, target: "/identity/mid-raw/suffix" }
+  expect:
+    status: 500

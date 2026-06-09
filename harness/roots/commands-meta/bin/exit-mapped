@@ -1,0 +1,3 @@
+#!/bin/sh
+printf 'exit:42\n'
+exit 42

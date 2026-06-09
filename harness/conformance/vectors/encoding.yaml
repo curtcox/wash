@@ -1,0 +1,67 @@
+- id: enc-brackets-in-segment
+  clauses: [RT-12.2-request-handling, PP-5.1-arity-n]
+  tier: MUST
+  root: encoding
+  request: { method: GET, target: "/echo1/%5B%5D" }
+  expect:
+    status: 200
+    body_exact: "argv=[[]]\n"
+    no_mutation: true
+
+- id: enc-slash-in-argv-segment
+  clauses: [PP-5.1-arity-n, RT-12.2-request-handling]
+  tier: MUST
+  root: encoding
+  request: { method: GET, target: "/echo1/a%2Fb/rest" }
+  expect:
+    status: 200
+    body_exact: "argv=[a/b]\n"
+    no_mutation: true
+
+- id: enc-question-literal-filename
+  clauses: [PP-9.1-trailing-q, RT-6.1-literal-file]
+  tier: MUST
+  root: encoding
+  request: { method: GET, target: "/literal%3Fq.txt" }
+  expect:
+    status: 200
+    body_contains: "literal"
+    no_mutation: true
+
+- id: enc-amp-command-name
+  clauses: [PP-8.1-amp-name]
+  tier: MUST
+  root: encoding
+  request: { method: GET, target: "/%26cmd/data.txt" }
+  expect:
+    status: 200
+    body_contains: "&cmd"
+    no_mutation: true
+
+- id: enc-decoded-slash-in-path-segment
+  clauses: [PP-9.1-invalid-segment, RT-12.2-root-escape]
+  tier: MUST
+  root: encoding
+  request: { method: GET, target: "/nested%2Fpath/file.txt" }
+  expect:
+    status_any: [400, 404]
+    no_mutation: true
+
+- id: enc-decoded-nul-in-path-segment
+  clauses: [PP-9.1-invalid-segment]
+  tier: MUST
+  root: encoding
+  request: { method: GET, target: "/bad%00name.txt" }
+  expect:
+    status_any: [400, 404]
+    no_mutation: true
+
+- id: enc-preserve-multi-question
+  clauses: [RT-12.2-request-handling, PP-6-query-delim]
+  tier: MUST
+  root: encoding
+  request: { method: GET, target: "/grep?arg=bravo/jq?arg=.x/data.txt" }
+  expect:
+    status: 200
+    body_contains: "grep(bravo):"
+    no_mutation: true

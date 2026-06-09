@@ -1,0 +1,15 @@
+bad-arity sh
+bad-exit sh
+bad-mime sh
+bad-stderr sh
+mutates-get sh
+input-file sh
+input-none sh
+output-file sh
+arity-range-bounded sh
+arity-range-star sh
+identity sh
+mid-raw sh
+noisy sh
+exit1 sh
+sort sh

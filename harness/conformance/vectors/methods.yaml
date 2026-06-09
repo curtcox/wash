@@ -1,0 +1,55 @@
+- id: methods-get-default
+  clauses: [PP-5.7-method-all-stages, RT-9.5-head-from-get]
+  tier: MUST
+  root: methods
+  request: { method: GET, target: "/defaultcmd/data.txt" }
+  expect:
+    status: 200
+    body_contains: "defaultcmd"
+    no_mutation: true
+
+- id: methods-head-from-get
+  clauses: [RT-9.5-head-from-get]
+  tier: MUST
+  root: methods
+  request: { method: HEAD, target: "/defaultcmd/data.txt" }
+  expect:
+    body_empty: true
+    head_of: methods-get-default
+
+- id: methods-post-disallowed-405
+  clauses: [RT-9.5-methods-405, PP-5.7-method-all-stages]
+  tier: MUST
+  root: methods
+  request:
+    method: POST
+    target: "/getonly/data.txt"
+    body_exact: "x\n"
+  expect:
+    status: 405
+
+- id: methods-put-literal-succeeds
+  clauses: [RT-9.2-put-literal]
+  tier: MUST
+  root: methods
+  request:
+    method: PUT
+    target: "/getonly/literal-only.txt"
+    body_exact: "written\n"
+  expect:
+    status: 200
+    mutation:
+      path: getonly/literal-only.txt
+      action: created
+      bytes: "written\n"
+
+- id: methods-pipeline-stage-blocks
+  clauses: [PP-5.7-method-all-stages, RT-9.5-methods-405]
+  tier: MUST
+  root: methods
+  request:
+    method: POST
+    target: "/getonly/identity/data.txt"
+    body_exact: "x\n"
+  expect:
+    status: 405

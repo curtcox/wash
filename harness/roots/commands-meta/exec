@@ -1,0 +1,9 @@
+getpost sh
+typed sh
+typed-mid sh
+stderr-discard sh
+stderr-merge sh
+exit-mapped sh
+explain sh
+noisy sh
+identity sh

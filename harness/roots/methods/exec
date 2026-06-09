@@ -1,0 +1,3 @@
+defaultcmd sh
+getonly sh
+identity sh

@@ -1,0 +1,50 @@
+- id: synth-declared-resource
+  clauses: [PP-9.5-synth]
+  tier: optional
+  root: synthesized
+  requires_capability:
+    path: synthesized_resources.fixtures
+    nonempty: true
+  request: { method: GET, target: "/docs/index" }
+  expect:
+    status: 200
+    body_exact: "wash-fixture: synthesized docs index\n"
+    no_mutation: true
+
+- id: synth-exact-file-beats-synth
+  clauses: [RT-6.2-precedence, PP-9.5-synth]
+  tier: optional
+  root: synthesized
+  requires_capability:
+    path: synthesized_resources.fixtures
+    nonempty: true
+  request: { method: GET, target: "/override/file.txt" }
+  expect:
+    status: 200
+    body_exact: "real file beats synth\n"
+    no_mutation: true
+
+- id: synth-command-beats-synth
+  clauses: [RT-6.2-precedence, PP-9.5-synth]
+  tier: optional
+  root: synthesized
+  requires_capability:
+    path: synthesized_resources.fixtures
+    nonempty: true
+  request: { method: GET, target: "/docs/identity/data.txt" }
+  expect:
+    status: 200
+    body_contains: "identity():"
+    no_mutation: true
+
+- id: synth-parse-terminal-400
+  clauses: [PP-9.5-parse-terminal, RT-10.4-invalid-parse]
+  tier: optional
+  root: synthesized
+  requires_capability:
+    path: synthesized_resources.fixtures
+    nonempty: true
+  request: { method: GET, target: "/docs/identity/extra/data.txt" }
+  expect:
+    status: 400
+    no_mutation: true
