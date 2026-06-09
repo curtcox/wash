@@ -341,6 +341,13 @@ Field notes:
   bundle still fails `RT-9.1-get-no-mutate`; implementations that cache generated
   results should keep that cache outside the served tree or behind an internal
   store not visible to the corpus diff.
+- `max_error_body_bytes` is the implementation's declared cap on diagnostic
+  body bytes (runtime §10.3 recommends 8 KiB, truncation indicated). The harness
+  records it and enforces it as a SHOULD-tier consistency check against the
+  implementation's own declaration: any error response (4xx/5xx) carrying a body
+  must not exceed the declared cap. This rides on the error vectors already in
+  the suite, so it adds no fixtures, and it makes the field an enforced contract
+  rather than unused metadata.
 - `synthesized_resources.fixtures` is the complete set of optional synthesized
   targets the harness can assert for this implementation. Each fixture gives a
   raw target plus expected status, headers, and body matchers using the same
@@ -468,7 +475,7 @@ they run anywhere the adapter's declared interpreters exist.
 |------|------------------------------|
 | `empty/` | Empty root is valid (§4.2). Everything 404s; `/` is dir behavior. |
 | `plain-files/` | Literal file mapping (§6.1), MIME inference, raw bytes, nested paths, dot-segment normalization, root-escape rejection. Trailing-`?` disambiguation (§9.1/Q19): `/file.txt?download=1` strips the query and matches the file first, while a `?` followed by any raw `/` is per-command syntax and prevents the exact-file match. |
-| `directories/` | Directory behavior (§6.5): one dir holding a default file (named from the manifest's `default_index_files`, materialized per-impl), one without (listing or impl-defined, gated on `directory_listing`), trailing-slash equivalence and repeated-slash collapse (§9.1), directory used as an implied-cat suffix `/wc/docs` (§9.4), and `/docs/grep/needle/file.txt` → 404 (no command lookup after directory traversal, §9.2). This root ships its own `env/path` + `wc` (the `linecount` fixture, §6.3) and `grep` (a tagging transform) commands and a real `docs/` directory, so the implied-cat-over-directory and no-command-in-directory vectors both have the fixtures they need. Because §6.5 permits implementation-defined directory behavior, the directory-serving cases run as capability-gated consistency checks, not flat MUST/SHOULD: when `default_index_files` is nonempty, the default-file vector materializes the first declared name and asserts that `/dir` and `/dir/` serve its fixed marker rather than a listing; when `directory_listing` is declared, the listing case asserts only that a non-error response is produced for a directory without a default file (its body format is impl-defined and not matched). The `/wc/docs` implied-cat-over-directory case is likewise implementation-defined — pipeline §9.4 says it "may fail naturally" — so it asserts no fixed status; it checks only that the outcome is deterministic across repeats for a given impl, never failing one status versus another. |
+| `directories/` | Directory behavior (§6.5): one dir holding a default file (named from the manifest's `default_index_files`, materialized per-impl), one without (listing or impl-defined, gated on `directory_listing`), trailing-slash equivalence and repeated-slash collapse (§9.1), directory used as an implied-cat suffix `/wc/docs` (§9.4), and `/docs/grep/needle/file.txt` → 404 (no command lookup after directory traversal, §9.2). This root ships its own `env/path` + `wc` (the `linecount` fixture, §6.3) and `grep` (a tagging transform) commands and a real `docs/` directory, so the implied-cat-over-directory and no-command-in-directory vectors both have the fixtures they need. Because §6.5 permits implementation-defined directory behavior, the directory-serving cases run as capability-gated consistency checks, not flat MUST/SHOULD: when `default_index_files` is nonempty, the default-file vector materializes the first declared name and asserts that `/dir` and `/dir/` serve its fixed marker rather than a listing; when `directory_listing` is declared, the listing case asserts only `status_class: non_error` for a directory without a default file (its body format is impl-defined and not matched). The `/wc/docs` implied-cat-over-directory case is likewise implementation-defined — pipeline §9.4 says it "may fail naturally" — so it asserts no fixed status: the vector uses `status_any` over the permitted outcomes (a served directory result or a natural pipeline failure, e.g. `[200, 400, 404, 500]`) and does not match the body, so it pins only that a well-formed HTTP response is returned rather than favoring one permitted status over another. |
 | `precedence/` | The §6.2 ladder. Contains a real file `wc` at root, a real file `bin/wc`, a real `grep/docs/file.txt`, and commands `wc`/`grep` on PATH. Proves exact-path-wins, `/bin/wc` serves file, `/grep/docs/file.txt` serves file. |
 | `commands-mf/` | Metadata-free commands only (arity 0). `cat`-style pass-through, identity, line-count. Proves implied cat, multi-stage pipelines, and that path args → 400 (§13.1, §13.2 of pipeline). |
 | `commands-arity/` | Commands with `arity 1`, `arity 2` (diff-like), `arity *`. Proves path-arg consumption, multi-resource via root-relative argv (§10.5), arity-star argv, and that a **path-arity** argument is percent-decoded and passed verbatim even when it contains a decoded `/` — `/echo1/a%2Fb/file.txt` with `echo1` arity 1 passes the single argv `a/b` (§5.1, Q21), distinct from the query-value encoding cases in `commands-query/`. |
@@ -787,7 +794,10 @@ the harness's HTTP client (§8) sends it verbatim.
 
 A vector's `expect` block supports a small, declarative matcher set:
 
-- `status`, or `status_any: [..]` where the spec permits a choice.
+- `status`, `status_any: [..]` where the spec permits a choice, or
+  `status_class` (`success` = any 2xx, `non_error` = any 2xx/3xx,
+  `client_error` = any 4xx, `server_error` = any 5xx) where the spec fixes only
+  the response class and not the exact code.
 - `body_exact`, `body_contains`, `body_matches` (regex), `body_base64` (binary).
 - `body_empty`: assert the response carries no entity body. This is how a HEAD
   vector asserts the omitted body (runtime §9.5) without an empty-string
@@ -818,7 +828,8 @@ A vector's `expect` block supports a small, declarative matcher set:
   `X-WebShell-Pipeline` etc. reflect the expected effective pipeline.
 - `error_body`: when `Accept: application/json`, assert the error doc contains
   diagnostic fields (failing command, unexpected segment) — SHOULD tier, since
-  exact text is non-normative (pipeline §10.1).
+  exact text is non-normative (pipeline §10.1 diagnostics, §10.5 Accept
+  negotiation).
 
 A vector's `request` block supports:
 
@@ -968,9 +979,11 @@ harness itself.
   visible. Target 100% MUST-clause coverage before declaring the harness v1. The
   zero-vector check is only as good as the registry's completeness: the §5 table is
   illustrative, so the real `spec.py` registry must enumerate **every** MUST clause
-  — including ones not shown there, e.g. runtime §6.4 (missing path → 404) and
-  §10.7 (commands consuming URL expressions) — or an untested clause passes the
-  gate by simply never appearing. Seeding the full MUST set into `spec.py` is part
+  — including ones not shown there, e.g. runtime §6.4 (missing path → 404), §10.7
+  (commands consuming URL expressions), the error-handling clauses runtime
+  §15.1–§15.6 (notably §15.6 command-generated HTTP errors) and pipeline
+  §10.2/§10.4/§10.5 (404 conditions, 500 cases, Accept-negotiated error format) —
+  or an untested clause passes the gate by simply never appearing. Seeding the full MUST set into `spec.py` is part
   of phase 1 (§12), and the coverage tool reports only on under-tested *known*
   clauses, never on clauses the registry forgot.
 - **Audit R1–R8 handling.** The `specs/audit.md` open items are *not* failures:
