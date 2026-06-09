@@ -11,7 +11,7 @@ import (
 // Returns a list of directory paths relative to root
 func LoadCommandPath(root string) ([]string, error) {
 	pathFile := filepath.Join(root, "env", "path")
-	
+
 	data, err := os.ReadFile(pathFile)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -23,7 +23,7 @@ func LoadCommandPath(root string) ([]string, error) {
 
 	var paths []string
 	scanner := bufio.NewScanner(strings.NewReader(string(data)))
-	
+
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
 		if line == "" || strings.HasPrefix(line, "#") {
@@ -43,18 +43,18 @@ func FindCommand(root string, commandName string, pathDirs []string) (string, er
 	for _, dir := range pathDirs {
 		fullDir := filepath.Join(root, dir)
 		cmdPath := filepath.Join(fullDir, commandName)
-		
+
 		info, err := os.Stat(cmdPath)
 		if err != nil {
 			continue // Not found or not accessible
 		}
-		
+
 		// Must be a regular file (not directory) and executable
 		if !info.IsDir() && (info.Mode()&0111 != 0 || isScript(cmdPath)) {
 			return cmdPath, nil
 		}
 	}
-	
+
 	return "", os.ErrNotExist
 }
 
@@ -65,12 +65,12 @@ func isScript(path string) bool {
 		return false
 	}
 	defer f.Close()
-	
+
 	buf := make([]byte, 2)
 	_, err = f.Read(buf)
 	if err != nil {
 		return false
 	}
-	
+
 	return string(buf) == "#!"
 }

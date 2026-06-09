@@ -247,6 +247,11 @@ they are skipped).
 
 **Final status**: 112/112 MUST, 1/1 SHOULD, 2/11 optional (skipped features not declared in capabilities)
 
+### Phase 8: CI & Housekeeping ✅
+1. **gofmt**: `internal/config/exec.go` and `internal/config/path.go` reformatted ✅
+2. **CI workflow**: `validate` job now validates `go.toml` capabilities; `conformance-go` job added (`needs: validate`, runs `make test-go-all`) ✅
+3. **`make validate`** includes `wash-conformance validate-capabilities harness/adapters/go.toml` ✅
+
 ## Testing Strategy
 
 ### Conformance-Driven Development
@@ -464,5 +469,5 @@ Key insights from Python reference (`impls/reference/wash/`):
 
 ---
 
-**Last Updated**: 2026-06-09  
-**Plan Version**: 1.0
+**Last Updated**: 2026-06-09 (Phase 8 complete)  
+**Plan Version**: 1.1

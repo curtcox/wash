@@ -22,6 +22,7 @@ jobs:
           wash-conformance validate-roots
           wash-conformance validate-vectors
           wash-conformance validate-capabilities harness/adapters/reference.toml
+          wash-conformance validate-capabilities harness/adapters/go.toml
           wash-conformance coverage
       - name: Harness self-tests
         run: cd harness && python -m pytest -q
@@ -44,3 +45,19 @@ jobs:
           pip install -e ./impls/reference
       - name: Run conformance against reference
         run: wash-conformance run --adapter harness/adapters/reference.toml
+
+  conformance-go:
+    runs-on: ubuntu-latest
+    needs: validate
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.23"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install harness
+        run: pip install -e "./harness[dev]"
+      - name: Run Go lint, unit tests, and conformance
+        run: make test-go-all

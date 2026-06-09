@@ -17,7 +17,7 @@ type ExecRule struct {
 // The exec file format is line-oriented: "pattern interpreter"
 func LoadExecRules(root string) ([]ExecRule, error) {
 	execFile := filepath.Join(root, "exec")
-	
+
 	data, err := os.ReadFile(execFile)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -29,7 +29,7 @@ func LoadExecRules(root string) ([]ExecRule, error) {
 
 	var rules []ExecRule
 	scanner := bufio.NewScanner(strings.NewReader(string(data)))
-	
+
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
 		if line == "" || strings.HasPrefix(line, "#") {
@@ -71,7 +71,7 @@ func matchPattern(pattern, name string) bool {
 	if pattern == name {
 		return true
 	}
-	
+
 	// Handle * wildcards
 	if strings.Contains(pattern, "*") {
 		parts := strings.Split(pattern, "*")
@@ -82,6 +82,6 @@ func matchPattern(pattern, name string) bool {
 			}
 		}
 	}
-	
+
 	return false
 }
