@@ -4,8 +4,8 @@ _wash_read_stdin
 argv_str=$(_wash_argv_str "$@")
 _wash_split_records | while IFS= read -r line; do
     case "$line" in
-        *$'\001'*)
-            record=${line%$'\001'}
+        *"$_WASH_SEP"*)
+            record=${line%"$_WASH_SEP"}
             _wash_emit_tagged "$(basename "$0")" "$argv_str" "$record"
 
             ;;

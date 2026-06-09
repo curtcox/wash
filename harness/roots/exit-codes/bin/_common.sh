@@ -1,4 +1,5 @@
 # Shared helpers for wash fixture commands (sourced, not executed).
+_WASH_SEP=$(printf '\001')  # SOH record separator (portable; bash $'\001' is not)
 _wash_tmp=
 _wash_tmp_cleanup() {
     if [ -n "$_wash_tmp" ] && [ -f "$_wash_tmp" ]; then

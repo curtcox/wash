@@ -7,8 +7,8 @@ out_path=$1
 _wash_read_stdin
 _wash_split_records | while IFS= read -r line; do
     case "$line" in
-        *$'\001'*)
-            printf '%s\n' "${line%$'\001'}"
+        *"$_WASH_SEP"*)
+            printf '%s\n' "${line%"$_WASH_SEP"}"
             ;;
     esac
 done | LC_ALL=C sort -o "$out_path"
