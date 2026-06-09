@@ -19,11 +19,11 @@ This document outlines the implementation plan for a Go port of the wash Web She
 impls/go/
 ├── go.mod                    # Module definition (go 1.23)
 ├── go.sum                    # Dependency checksums (empty for stdlib-only)
-├── main.go                   # Entry point, CLI flags
 ├── wash.capabilities.json    # Capability declaration
+├── bin/                      # Build artifacts (gitignored): wash-server binary
 ├── cmd/
 │   └── wash-server/
-│       └── main.go           # CLI wrapper
+│       └── main.go           # Sole entry point: CLI flags, server bootstrap
 ├── internal/
 │   ├── server/               # HTTP server, routing, handlers
 │   │   ├── server.go         # HTTP server setup
@@ -103,81 +103,90 @@ type FS interface {
 
 ## Spec Clause Mapping
 
-### runtime.md §6: URL-to-directory Mapping
+This table is the full contract: every clause in the conformance registry
+(`harness/conformance/spec.py`) is listed, in registry order, with its tier and
+the Go component responsible for it. **Source of truth is `spec.py`** — if a
+clause is added or retiered there, update this table or conformance drifts.
+66 clauses total — 57 MUST, 4 SHOULD, 5 optional. Implementation must pass all
+MUST and SHOULD; optional clauses are gated by `wash.capabilities.json` (declare
+a capability ⇒ the matching optional vectors run and must pass; leave it off ⇒
+they are skipped).
 
-| Clause | Component | Notes |
-|--------|-----------|-------|
-| RT-6.1-literal-file | `filesystem.ResolveExact` | Exact path resolution before command parse |
-| RT-6.2-precedence | `parser.Parse` | Precedence ladder: exact > command > synthesized > 404 |
-| RT-6.3-direct-cmd-file | `filesystem.ReadFile` | Direct file access to command files |
-| RT-6.4-missing-path | `parser.Parse`, `server.Handler` | 404 for unresolvable paths |
-| RT-6.5-dir-index | `filesystem.ListDir` | Index.html precedence over listing |
+### runtime.md
 
-### runtime.md §7: Directory Layout
+| Clause | Tier | Component | Notes |
+|--------|------|-----------|-------|
+| RT-4.2-root-valid | MUST | `filesystem.NewRoot`, `server.Server` | Empty root directory is valid; server still starts |
+| RT-6.1-literal-file | MUST | `filesystem.ResolveExact` | Plain URL path maps literally to root file before any command parse |
+| RT-6.2-precedence | MUST | `parser.Parse` | Ladder: exact file > command > synthesized > 404 |
+| RT-6.3-direct-cmd-file | MUST | `filesystem.ReadFile` | Concrete path to a command file serves its bytes |
+| RT-6.4-missing-path | MUST | `parser.Parse`, `server.Handler` | No parse + no resource → 404 |
+| RT-6.5-dir-index | optional | `filesystem.ListDir` | Declared index file wins over listing (gated by `default_index_files`) |
+| RT-7.1-command-path | MUST | `config.LoadCommandPath` | `env/path` line-oriented search path |
+| RT-7.2-exec-rules | MUST | `config.LoadExecRules`, `executor.Interpreter` | First-match-wins; malformed rule → 500 |
+| RT-9.1-get-no-mutate | MUST | `server.Handler` | GET must not mutate local state |
+| RT-9.2-put-literal | MUST | `server.Handler`, `filesystem.PutFile` | PUT targets literal path, no command parsing |
+| RT-9.3-post-plain-405 | MUST | `server.Handler` | POST to plain file/dir without governing command → 405 |
+| RT-9.4-delete-literal | MUST | `server.Handler`, `filesystem.DeleteFile` | DELETE targets literal path, no command parsing |
+| RT-9.5-head-from-get | MUST | `server.Handler` | GET permitted ⇒ HEAD answered with body omitted |
+| RT-9.5-methods-405 | MUST | `parser.checkMethods`, `metadata` | Method not in `methods` metadata → 405 |
+| RT-9.5-head-explicit | optional | `server.Handler` | HEAD when explicit methods list has GET but not HEAD (not asserted) |
+| RT-10.4-invalid-parse | MUST | `server.Handler` | Client-controlled parse errors → 400 |
+| RT-10.5-multi-resource | MUST | `parser.consumeArgv`, `executor` | Command may consume multiple root-relative resources via arity |
+| RT-10.6-request-body | MUST | `executor.Pipeline`, `server.Handler` | Request body feeds rightmost stage stdin; **input suffix wins over body** |
+| RT-10.7-url-expr | MUST | `parser.RawCommandParse` | parse-raw consumes remaining URL expression and stops parsing |
+| RT-12.2-request-handling | MUST | `server.Handler`, `parser` | Parse raw request-target; **no `net/url` normalization** before parse |
+| RT-12.2-root-escape | MUST | `filesystem.CheckEscape` | Literal serving rejects paths escaping configured root |
+| RT-12.3-cwd-root | MUST | `executor.Stage` | Command cwd defaults to root for root-relative argv |
+| RT-13.1-cors-default | SHOULD | `server.middleware` | No `Access-Control-Allow-Origin` by default |
+| RT-13.2-mutating-methods | MUST | `server.Handler`, `metadata.Validate` | Mutation requires explicit method/metadata opt-in |
+| RT-15.1-not-found | MUST | `server.Handler` | No resource and no parse → 404 |
+| RT-15.2-invalid-parse | MUST | `server.Handler` | Invalid parse → 400 with diagnostics |
+| RT-15.3-exit-status | MUST | `executor.Stage`, `metadata.ExitMap` | Nonzero exit mapped to error status with diagnostics |
+| RT-15.5-interpreter-fail | MUST | `executor.Interpreter` | Unresolved interpreter → 500 |
+| RT-15.6-cmd-http-errors | MUST | `executor.Result`, `server.Handler` | Command-generated HTTP errors surfaced per contract |
+| RT-R7-case | optional | `filesystem.ResolveExact` | Case sensitivity consistent with `case_sensitive_lookup` |
 
-| Clause | Component | Notes |
-|--------|-----------|-------|
-| RT-7.1-command-path | `config.LoadCommandPath` | `env/path` line-oriented loading |
-| RT-7.2-exec-rules | `config.LoadExecRules` | `exec` file parsing, glob matching |
+### pipeline_parsing.md
 
-### pipeline_parsing.md §2: Parse Algorithm
-
-| Clause | Component | Notes |
-|--------|-----------|-------|
-| PP-2-parse-algo | `parser.Parse` | Left-to-right algorithm implementation |
-| PP-4-arity0-default | `metadata.Defaults` | Arity 0, stdin/stdout defaults |
-| PP-4-implied-cat | `executor.Pipeline` | Runtime primitive for input suffix |
-
-### pipeline_parsing.md §5: Metadata
-
-| Clause | Component | Notes |
-|--------|-----------|-------|
-| PP-5.1-arity-n | `metadata.Parse`, `parser.consumeArgv` | Fixed arity consumption |
-| PP-5.2-arity-star | `metadata.Parse`, `parser.consumeArgv` | Variable arity (rest-of-URL) |
-| PP-5.3-input-stdout | `executor.Stage` | stdin/stdout mode handling |
-| PP-5.4-exit-map | `executor.Stage`, `metadata.ExitMap` | Exit code to HTTP status |
-| PP-5.5-malformed-500 | `metadata.Validate` | Return 500 for malformed metadata |
-| PP-5.7-parse-raw | `parser.RawCommandParse` | parse-mode raw handling |
-| PP-5.7-method-all-stages | `parser.checkMethods` | Method gate for all stages |
-| PP-5.7-mutates-get-invalid | `metadata.Validate` | GET + mutates=true = 500 |
-| PP-5.8-mime-final | `executor.Result` | Final stage Content-Type |
-| PP-5.9-stderr-field | `executor.Stage` | discard/merge semantics |
-
-### pipeline_parsing.md §6: Query Strings
-
-| Clause | Component | Notes |
-|--------|-----------|-------|
-| PP-6-query-delim | `parser.segment` | Per-command query delimited by next / |
-| PP-6.1-core-arg | `parser.segment` | arg parameter handling |
-| PP-6.2-query-disables-arity | `parser.Pipeline` | Query argv overrides path arity |
-| PP-6.3-arg-noncmd-400 | `parser.segment` | arg on non-command = 400 |
-
-### pipeline_parsing.md §8: Stderr Pipeline
-
-| Clause | Component | Notes |
-|--------|-----------|-------|
-| PP-8-stderr-prefix | `parser.segment` | & prefix parsing |
-| PP-8.1-amp-name | `parser.segment` | Leading & stripped pre-decode |
-
-### HTTP Methods (§9)
-
-| Clause | Component | Notes |
-|--------|-----------|-------|
-| RT-9.1-get-no-mutate | `server.Handler` | GET must not mutate |
-| RT-9.2-put-literal | `server.Handler` | PUT targets literal path |
-| RT-9.3-post-plain-405 | `server.Handler` | POST without command = 405 |
-| RT-9.4-delete-literal | `server.Handler` | DELETE targets literal path |
-| RT-9.5-head-from-get | `server.Handler` | HEAD derived from GET |
-| RT-9.5-methods-405 | `parser.checkMethods` | Method not in metadata = 405 |
-
-### Error Handling
-
-| Clause | Component | Notes |
-|--------|-----------|-------|
-| RT-15.1-not-found | `server.Handler` | 404 for no resource/parse |
-| RT-15.2-invalid-parse | `server.Handler` | 400 for parse errors |
-| RT-15.3-exit-status | `executor.Stage` | Nonzero exit mapped to HTTP status |
-| RT-15.5-interpreter-fail | `executor.Stage` | 500 for unresolved interpreter |
+| Clause | Tier | Component | Notes |
+|--------|------|-----------|-------|
+| PP-2-parse-algo | MUST | `parser.Parse` | Normative left-to-right algorithm + precedence ladder |
+| PP-4-arity0-default | MUST | `metadata.Defaults`, `parser` | Metadata-free ⇒ arity 0, closed-empty stdin when no suffix/body |
+| PP-4-implied-cat | MUST | `executor.Pipeline` | Rightmost suffix fed via implied `cat` primitive |
+| PP-5.1-arity-n | MUST | `metadata.Parse`, `parser.consumeArgv` | Arity N consumes N segments as argv |
+| PP-5.2-arity-star | MUST | `metadata.Parse`, `parser.consumeArgv` | Arity `*` consumes rest of URL; no input suffix |
+| PP-5.3-input-stdout | MUST | `executor.Stage` | v1 stdin/stdout modes; reserved modes → 500 |
+| PP-5.4-exit-map | MUST | `executor`, `metadata.ExitMap` | exit→status with pipefail aggregation (first in URL order wins) |
+| PP-5.5-malformed-500 | MUST | `metadata.Validate` | Malformed recognized field → 500 |
+| PP-5.7-parse-raw | MUST | `parser.RawCommandParse` | parse-raw takes encoded suffix and stops parsing |
+| PP-5.7-method-all-stages | MUST | `parser.checkMethods` | Every stage must permit the request method |
+| PP-5.7-mutates-get-invalid | MUST | `metadata.Validate` | GET permitted + mutates=true is invalid → 500 |
+| PP-5.8-mime-final | MUST | `executor.Result` | `mime` sets final-stage Content-Type; ignored mid-pipeline |
+| PP-5.9-stderr-field | MUST | `executor.Stage` | stderr discard/merge semantics for response body |
+| PP-6-query-delim | MUST | `parser.segment` | Per-command query ends at next raw `/` |
+| PP-6.1-core-arg | MUST | `parser.segment` | `arg` is the only core query parameter |
+| PP-6.2-query-disables-arity | MUST | `parser.Pipeline` | Query argv disables metadata path arity for that command |
+| PP-6.3-arg-noncmd-400 | MUST | `parser.segment` | Core `arg` on non-command segment → 400 |
+| PP-7-mid-noncmd-400 | MUST | `parser.Parse` | Non-command middle segment with metadata-free commands → 400 |
+| PP-8-stderr-prefix | MUST | `parser.segment` | `/&` prefix merges exactly one pipeline boundary |
+| PP-8.1-amp-name | MUST | `parser.segment` | Leading `&` stripped pre-decode; `%26` is a name character |
+| PP-9.1-trailing-q | MUST | `parser.segment` | Trailing `?` in final segment is resource query before command reinterpretation |
+| PP-9.1-slash-collapse | MUST | `parser.segment` | Leading/trailing/repeated `/` collapse; trailing slash insignificant |
+| PP-9.1-invalid-segment | MUST | `parser.segment`, `filesystem` | Decoded `/` and NUL invalid in filesystem-lookup segments |
+| PP-9.2-no-cmd-in-dir | MUST | `parser.Parse` | No command lookup after directory traversal |
+| PP-9.3-args-before-suffix | MUST | `parser.consumeArgv` | Path arity arguments consumed before input suffix |
+| PP-9.4-dir-suffix | MUST | `parser.Parse`, `executor.Pipeline` | Directory suffix evaluated via implied `cat`, not HTTP directory behavior |
+| PP-9.5-synth | optional | `server.Handler` | Synthesized resource behavior (disabled in capabilities) |
+| PP-9.5-parse-terminal | MUST | `parser.Parse` | Started-command parse failure is terminal; no synthesized fallback |
+| PP-10.1-400-diagnostics | SHOULD | `server.response` | 400 bodies include parse-failure diagnostics |
+| PP-10.2-404 | MUST | `server.Handler` | 404 when no resource, no synth, no command parse can start |
+| PP-10.3-exit-diagnostics | SHOULD | `server.response`, `executor` | Nonzero-exit bodies include command/exit/pipeline diagnostics |
+| PP-10.4-500 | MUST | `server.Handler`, `metadata` | Malformed metadata + server-side failures → 500 |
+| PP-10.5-error-format | SHOULD | `server.response` | Error bodies content-negotiated via `Accept` |
+| PP-11-headers | optional | `server.response` | `X-WebShell-*` execution metadata headers when declared (`execution_metadata_headers`) |
+| PP-13.1-mf-path-args | MUST | `parser`, `metadata.Defaults` | Metadata-free path arguments invalid → 400 |
+| PP-13.2-mf-multi-path-args | MUST | `parser` | Metadata-free multi-command path args invalid → 400 |
 
 ## Implementation Order
 
@@ -185,7 +194,10 @@ type FS interface {
 1. **Project skeleton**: `go.mod`, `main.go`, basic HTTP server
 2. **Filesystem module**: Root resolution, exact path lookup, root-escape detection
 3. **Basic file serving**: GET for literal files, MIME inference by extension
-4. **Adapter manifest**: `harness/adapters/go.toml` for conformance testing
+4. **Adapter manifest + build target**: `harness/adapters/go.toml` pointing at the
+   pre-built `impls/go/bin/wash-server`, plus a `build-go` Makefile target (see
+   Integration Testing). Verify a build → conformance loop works end to end before
+   layering on behavior.
 
 **Milestones**: Can serve static files from root directory; passes `plain-files` vectors
 
@@ -277,20 +289,50 @@ func TestParseSegment(t *testing.T) {
 
 ### Integration Testing
 
-Use the harness vectors as the primary integration test suite. The Go adapter:
+Use the harness vectors as the primary integration test suite.
+
+**Build the binary first — the adapter does not compile.** The adapter schema
+(`harness/conformance/adapter.py`) only runs `start`/`stop`; it has no build
+hook. The harness launches a *fresh server process per root* (≈22 roots, many
+times across a full run), so a `start = ["go", "run", ...]` line would recompile
+on every launch and pay the Go compile cost each time. Worse, a cold first
+compile can exceed `ready_timeout_sec = 10` and produce flaky readiness
+failures. So `start` must point at a **pre-built binary**:
 
 ```toml
 # harness/adapters/go.toml
 name        = "go"
-start       = ["go", "run", "./impls/go/cmd/wash-server", "--root", "{root}", "--port", "{port}"]
+start       = ["impls/go/bin/wash-server", "--root", "{root}", "--port", "{port}"]
 stop        = "SIGTERM"
 port_mode   = "assigned"
 ready       = { type = "tcp" }
 ready_timeout_sec = 10
-cwd         = "."
+cwd         = "."          # paths in `start` resolve from repo root
 env         = {}
 capabilities = "impls/go/wash.capabilities.json"
 ```
+
+The binary is produced out-of-band before conformance runs. Add a Makefile
+target and wire it into the CI gate so `harness/adapters/go.toml` always has a
+fresh binary to launch:
+
+```makefile
+build-go:
+	cd impls/go && go build -o bin/wash-server ./cmd/wash-server
+
+conformance-go: build-go
+	wash-conformance run --adapter harness/adapters/go.toml
+```
+
+`impls/go/bin/` is a build artifact — add it to `.gitignore`. CI runs
+`build-go` before the Go conformance step (mirror the Python job in
+`.github/workflows/conformance.yml`, but with `go build` instead of an editable
+`pip install`). Process cleanup needs no special handling: the harness sends
+`SIGTERM` to the whole process group (`os.killpg`, with `start_new_session=True`),
+so a single compiled binary is reaped cleanly on shutdown.
+
+**Single entry point.** Build from `./cmd/wash-server` only; drop the redundant
+root-level `main.go` from the module tree so there is exactly one `main` package.
 
 ## Noted External Libraries
 
@@ -305,6 +347,12 @@ While the implementation is stdlib-only, these libraries would provide significa
 
 ## Capability Declaration
 
+This mirrors `impls/reference/wash.capabilities.json` exactly. Keep it in lock-step
+with the reference unless the Go impl deliberately diverges — the harness uses
+these flags to decide which optional-tier vectors apply, so an unintended extra
+entry (e.g. an `.html` MIME mapping the reference omits) silently changes which
+vectors run against the Go server.
+
 ```json
 {
   "spec_version": "1",
@@ -314,7 +362,7 @@ While the implementation is stdlib-only, these libraries would provide significa
   "synthesized_resources": { "enabled": false, "fixtures": [] },
   "mime": {
     "inference": "by-extension",
-    "map": { ".txt": "text/plain", ".json": "application/json", ".html": "text/html" },
+    "map": { ".txt": "text/plain", ".json": "application/json" },
     "default": "application/octet-stream"
   },
   "options_cors": "implementation-defined",
@@ -344,7 +392,11 @@ While the implementation is stdlib-only, these libraries would provide significa
 
 ## Success Criteria
 
-1. **Conformance**: Pass all MUST and SHOULD tier vectors
+1. **Conformance**: Pass all MUST and SHOULD tier vectors (57 MUST + 4 SHOULD
+   clauses). Optional-tier clauses (5) are in scope only where the matching
+   capability is declared — with the capabilities above, dir-index, case, and
+   `X-WebShell-*` header vectors run and must pass, while synthesized-resource
+   vectors are expected to be skipped (declared disabled), not passed.
 2. **Performance**: Comparable or better than Python reference on benchmark roots
 3. **Compatibility**: Drop-in replacement via adapter manifest change
 4. **Maintainability**: Clear module boundaries, comprehensive comments
