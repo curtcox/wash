@@ -3,6 +3,8 @@
 ## Project Shape
 `wash` is a local HTTP server/specification that maps URL paths to a project root: files, directories, and composable command pipelines. The source-of-truth behavior is in `specs/runtime.md` and `specs/pipeline_parsing.md`.
 
+Domain terms (corpus, root, vector, clause, tier, adapter, capability, materialize) are defined in the glossary in `harness/AGENTS.md`.
+
 ## Where Code Lives
 - `specs/`: normative runtime and parsing specs plus the v1 open-question audit.
 - `harness/conformance/`: Python conformance harness and CLI.
@@ -49,8 +51,12 @@ goal is zero differences across all implementations.
 wash-conformance run --adapter harness/adapters/reference.toml --root precedence
 wash-conformance run --adapter harness/adapters/reference.toml --tier MUST
 wash-conformance run --adapter harness/adapters/reference.toml --clause PP-4-implied-cat
-python -m wash.server --root harness/roots/plain-files --port 8080
+python -m wash.server --root harness/roots/plain-files --port 8080  # blocks until Ctrl-C
 ```
+
+The last command (and `make smoke-reference`) starts a server in the foreground and
+holds the port until interrupted — run it in a background shell if you need to issue
+requests against it from the same session.
 
 ## Gotchas
 - Keep `harness` and `impls/reference` as separate packages; `conformance` must not import `wash`.
@@ -59,4 +65,4 @@ python -m wash.server --root harness/roots/plain-files --port 8080
 - `harness/roots/_lib/exit*.sh` and `harness/roots/_lib/exit*.py` are generated on demand and intentionally ignored.
 - The default local Python may not have harness dependencies until the editable installs above are run.
 - Supported Python starts at 3.11, CI currently runs 3.12, and local environments may be newer; avoid syntax or stdlib behavior that would fail on the support floor or CI version.
-- No strict commit format is documented for this repo.
+- No strict commit format is enforced. Default to a concise imperative subject line (e.g. "Add path-outside vector"); body optional.
