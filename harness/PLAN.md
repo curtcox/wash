@@ -224,11 +224,14 @@ through `env` or start arguments.
   `ready_timeout_sec` is reported as a launch failure, not a spec failure (so a
   broken adapter is distinguishable from a broken runtime).
 - **Liveness between vectors.** Within an isolation group the harness checks the
-  child is still alive before each vector and treats a connection-refused /
-  connection-reset result as evidence the process died. A server that exits or
-  crashes mid-group is reported as `PROCESS_DIED` (§10) for the affected vector and
-  the remainder of the group, with the captured child output attached — never as a
-  per-vector spec `FAIL`, so a crash is not conflated with a wrong answer.
+  child is still alive before each vector. If a request gets connection-refused,
+  connection-reset, EOF before a status line, or another transport-level failure,
+  the harness immediately polls the child: if it has exited, the affected vector
+  and the remainder of the group are reported as `PROCESS_DIED` (§10), with the
+  captured child output attached; if the child is still alive, only that vector is
+  scored as a response failure (`FAIL` for MUST/optional, `WARN` for SHOULD) with
+  the transport diagnostic attached. This keeps crashes distinct from servers that
+  stay up but fail to produce a valid HTTP response for a particular request.
 - **One root per instance.** Per `runtime.md` §4.2/§12.1, a server maps exactly
   one root. The harness relaunches for each root rather than reconfiguring.
 - **Teardown.** SIGTERM, then SIGKILL after a grace period. Port must be released
@@ -260,9 +263,13 @@ rather than silently accepting it: `mime.inference` ∈ {`by-extension`, `none`}
 `options_cors` ∈ {`implementation-defined`, `disabled`}; `symlink_policy` ∈
 {`reject-escaping`, `follow`, `unsupported`}; `error_body_formats` entries are
 media-type strings drawn from {`text/plain`, `application/json`}. Free-form fields
-(`map`, `interpreters`, `runtime_artifact_paths`, `default_index_files`) stay open.
-The schema is the source of truth for these sets; this list is illustrative of the
-shape, and the schema must be authored to match in phase 1 (§12).
+(`map`, `interpreters`, `runtime_artifact_paths`, `default_index_files`) stay open
+for values, but not for shape or safety: any field later used as a filesystem path
+is schema-validated according to its role (single filename vs. root-relative path
+list), with absolute paths, empty names, `.`/`..` segments, backslashes, NULs, and
+control bytes rejected before materialization. The schema is the source of truth for
+these sets; this list is illustrative of the shape, and the schema must be authored
+to match in phase 1 (§12).
 
 `wash.capabilities.json`:
 
@@ -289,7 +296,7 @@ shape, and the schema must be authored to match in phase 1 (§12).
   "put_creates_parents": true,
   "runtime_artifact_paths": [],
   "interpreters": ["sh", "python3"],
-  "command_full_http_response": { "enabled": false, "fixtures": [] }
+  "command_full_http_response": { "enabled": false }
 }
 ```
 
@@ -319,6 +326,10 @@ Field notes:
   `origin_form`. If an implementation legitimately serves on
   `http://cross-origin.invalid`, it may override the foreign origin the harness
   sends via an optional `cross_origin_probe` manifest field.
+  `validate-capabilities` rejects any `origin_form` that is not `http`, that
+  contains a path/query/fragment/userinfo component, that embeds a port, or whose
+  host is not a loopback literal/name accepted by the adapter lifecycle. The
+  launch port always comes from the harness, never from the manifest.
 - `interpreters` lists the interpreters the implementation can resolve through
   `exec` rules. The harness uses it to materialize command roots with a supported
   fixture-script language (§6.3). If a selected MUST vector cannot be run because
@@ -341,6 +352,11 @@ Field notes:
   bundle still fails `RT-9.1-get-no-mutate`; implementations that cache generated
   results should keep that cache outside the served tree or behind an internal
   store not visible to the corpus diff.
+- `default_index_files` entries are filenames, not paths. Each entry must be a
+  single safe relative name with no slash, backslash, dot segment, empty string, or
+  NUL/control byte. The materializer writes only under the intended directory in
+  the temp root, and validation fails before any fixture is created if the manifest
+  supplies an unsafe name.
 - `max_error_body_bytes` is the implementation's declared cap on diagnostic
   body bytes (runtime §10.3 recommends 8 KiB, truncation indicated). The harness
   records it and enforces it as a SHOULD-tier consistency check against the
@@ -353,13 +369,15 @@ Field notes:
   raw target plus expected status, headers, and body matchers using the same
   vocabulary as vector `expect` blocks. `enabled: true` with an empty fixture list
   is informational only and runs no synthesized-resource vectors.
-- `command_full_http_response.fixtures` is the analogous declaration for
-  commands that emit full HTTP responses. Each fixture names the corpus command
-  target and exact status/header/body expectations. `enabled: true` with no
-  fixtures records support but runs no portable assertion.
+- `command_full_http_response.enabled` records whether an implementation supports
+  commands that emit full HTTP responses. The flag is informational only in v1:
+  the specs do not define a portable stdout protocol or metadata switch that lets
+  the shared corpus distinguish "raw bytes" from "full HTTP response", so the
+  harness does not materialize or assert implementation-specific command fixtures
+  for this behavior.
 
-Both fixture lists use the same object shape, validated by
-`capabilities.schema.json`:
+Synthesized-resource fixtures use the same expectation vocabulary as vectors and
+are validated by `capabilities.schema.json`:
 
 ```json
 {
@@ -441,7 +459,7 @@ Examples of clause ids and tiers (illustrative, not exhaustive):
 | `PP-9.2-no-cmd-in-dir` | pipeline §9.2 | MUST | no command lookup after dir traversal |
 | `PP-9.1-trailing-q` | pipeline §9.1 | MUST | trailing `?` is resource query first |
 | `PP-9.1-slash-collapse` | pipeline §9.1 | MUST | leading/trailing/repeated `/` collapse; trailing slash insignificant |
-| `PP-9.4-dir-suffix` | pipeline §9.4 | MUST | directory may be the implied-cat input suffix |
+| `PP-9.4-dir-suffix` | pipeline §9.4 | MUST | directory suffix is evaluated through implied cat, never direct HTTP directory behavior |
 | `PP-5.7-parse-raw` | pipeline §5.7 | MUST | `parse-mode raw` takes the encoded suffix, stops parsing |
 | `PP-5.7-method-all-stages` | pipeline §5.7 | MUST | every stage must permit the request method |
 | `PP-5.8-mime-final` | pipeline §5.8 | MUST | `mime` sets final-stage Content-Type; ignored mid-pipeline |
@@ -475,7 +493,7 @@ they run anywhere the adapter's declared interpreters exist.
 |------|------------------------------|
 | `empty/` | Empty root is valid (§4.2). Everything 404s; `/` is dir behavior. |
 | `plain-files/` | Literal file mapping (§6.1), MIME inference, raw bytes, nested paths, dot-segment normalization, root-escape rejection. Trailing-`?` disambiguation (§9.1/Q19): `/file.txt?download=1` strips the query and matches the file first, while a `?` followed by any raw `/` is per-command syntax and prevents the exact-file match. |
-| `directories/` | Directory behavior (§6.5): one dir holding a default file (named from the manifest's `default_index_files`, materialized per-impl), one without (listing or impl-defined, gated on `directory_listing`), trailing-slash equivalence and repeated-slash collapse (§9.1), directory used as an implied-cat suffix `/wc/docs` (§9.4), and `/docs/grep/needle/file.txt` → 404 (no command lookup after directory traversal, §9.2). This root ships its own `env/path` + `wc` (the `linecount` fixture, §6.3) and `grep` (a tagging transform) commands and a real `docs/` directory, so the implied-cat-over-directory and no-command-in-directory vectors both have the fixtures they need. Because §6.5 permits implementation-defined directory behavior, the directory-serving cases run as capability-gated consistency checks, not flat MUST/SHOULD: when `default_index_files` is nonempty, the default-file vector materializes the first declared name and asserts that `/dir` and `/dir/` serve its fixed marker rather than a listing; when `directory_listing` is declared, the listing case asserts only `status_class: non_error` for a directory without a default file (its body format is impl-defined and not matched). The `/wc/docs` implied-cat-over-directory case is likewise implementation-defined — pipeline §9.4 says it "may fail naturally" — so it asserts no fixed status: the vector uses `status_any` over the permitted outcomes (a served directory result or a natural pipeline failure, e.g. `[200, 400, 404, 500]`) and does not match the body, so it pins only that a well-formed HTTP response is returned rather than favoring one permitted status over another. |
+| `directories/` | Directory behavior (§6.5): one dir holding a default file (named from the manifest's `default_index_files`, materialized per-impl), one without (listing or impl-defined, gated on `directory_listing`), trailing-slash equivalence and repeated-slash collapse (§9.1), directory used as an implied-cat suffix `/dirprobe/docs` (§9.4), and `/docs/grep/needle/file.txt` → 404 (no command lookup after directory traversal, §9.2). This root ships its own `env/path` + `dirprobe` (a fixture command that emits a fixed `dirprobe:` prefix before echoing any stdin) and `grep` (a tagging transform) commands and a real `docs/` directory, so the implied-cat-over-directory and no-command-in-directory vectors both have the fixtures they need. Because §6.5 permits implementation-defined directory behavior, the directory-serving cases run as capability-gated consistency checks, not flat MUST/SHOULD: when `default_index_files` is nonempty, the default-file vector materializes the first declared name and asserts that `/dir` and `/dir/` serve its fixed marker rather than a listing; when `directory_listing` is declared, the listing case asserts only `status_class: non_error` for a directory without a default file (its body format is impl-defined and not matched). The `/dirprobe/docs` implied-cat-over-directory case uses `one_of` expectations (§7.1) rather than a broad status wildcard: a success response must contain the `dirprobe:` marker, proving command execution rather than direct directory serving; a natural directory-read failure may return an error status, but the body must not contain the fixed direct-directory marker or default-index marker. |
 | `precedence/` | The §6.2 ladder. Contains a real file `wc` at root, a real file `bin/wc`, a real `grep/docs/file.txt`, and commands `wc`/`grep` on PATH. Proves exact-path-wins, `/bin/wc` serves file, `/grep/docs/file.txt` serves file. |
 | `commands-mf/` | Metadata-free commands only (arity 0). `cat`-style pass-through, identity, line-count. Proves implied cat, multi-stage pipelines, and that path args → 400 (§13.1, §13.2 of pipeline). |
 | `commands-arity/` | Commands with `arity 1`, `arity 2` (diff-like), `arity *`. Proves path-arg consumption, multi-resource via root-relative argv (§10.5), arity-star argv, and that a **path-arity** argument is percent-decoded and passed verbatim even when it contains a decoded `/` — `/echo1/a%2Fb/file.txt` with `echo1` arity 1 passes the single argv `a/b` (§5.1, Q21), distinct from the query-value encoding cases in `commands-query/`. |
@@ -488,7 +506,7 @@ they run anywhere the adapter's declared interpreters exist.
 | `exit-codes/` | Commands with deterministic exit codes + `exit` maps; validates default nonzero→400, custom maps, and pipefail aggregation (first-in-URL-order wins, §5.4). |
 | `methods/` | Commands declaring `methods GET POST`, GET-only, mutating-with-POST; validates 405, every-stage-must-permit-method, and HEAD-from-GET. The HEAD assertion is made only for the metadata-absent default (GET permitted ⇒ HEAD answered, body omitted), which §9.5 states unambiguously; the vector pairs the HEAD with its GET via `head_of` and asserts matching status, omitted body, and only the explicitly named header expectations (§7.1). Whether an *explicit* `methods` list that includes GET but omits HEAD suppresses HEAD is genuinely ambiguous in §9.5 (the suppression sentence conflicts with the GET⇒HEAD default), so the harness does not assert HEAD behavior for explicit-list commands — it is recorded as implementation-defined until the spec resolves it (tracked as audit R8). |
 | `mutation/` | PUT/DELETE/POST against plain files; validates literal targeting (§9.2/§9.4) and POST-to-plain→405 (§9.3). The MUST-level PUT/DELETE vectors target paths whose parent already exists, so the literal mutation is unambiguous; PUT into a missing parent is a separate vector gated on `put_creates_parents` (§4). Command-governed POST *write* semantics (e.g. the `sort output.txt/input.txt` redirection of §9.3) are command-specific, not defined by the core spec, so they are **not** a core MUST: this root ships a fixture command with declared write behavior and the vector asserts only consistency with that shipped command's contract (it exercises the impl's body/argv plumbing and method gating, not a portable redirection rule). **Run only on disposable copies.** |
-| `exec-rules/` | `exec` interpreter rules: exact basename match, glob match against relative path, first-match-wins, comment/blank handling, malformed rule→500, unresolved interpreter→500 (§7.2, §15.5). Because the `exec` file's exact bytes *are* the assertion, this root is **pinned to `sh`** (`requires_interpreter: sh`) and exempt from the interpreter-substitution pass (§6.3); its selected MUST vectors are `UNTESTED` for an implementation that does not declare `sh`. |
+| `exec-rules/` | `exec` interpreter rules: exact basename match, glob match against relative path, first-match-wins, comment/blank handling, malformed rule→500, unresolved interpreter→500 (§7.2, §15.5). The positive rules participate in interpreter substitution like other command roots; malformed-rule fixtures are authored so their invalidity is independent of the interpreter token, and unresolved-interpreter fixtures use a reserved missing-interpreter sentinel that substitution deliberately leaves untouched. |
 | `encoding/` | Percent-encoding edge cases: `%5B%5D`, `%2F` in argv vs path, `%3F` literal `?` filename, `%26` literal-`&` command name, decoded NUL/`/` rejection in path segments. A decoded `/` or NUL is valid in an *argument* segment (§5.1, passed verbatim) but invalid in a *filesystem-lookup* segment (§9.1/§12.2); the spec marks the latter "invalid" without fixing a status, so those vectors assert `status_any: [400, 404]` rather than a single class. |
 | `symlinks/` | Symlink policy checks gated on `symlink_policy` and host support. The materializer synthesizes an in-root symlink and a harmless escaping symlink to a sibling bundle file. `reject-escaping` asserts the escaping target is not served (allowed rejection statuses only, and body must not contain the outside bytes); `follow` asserts the declared follow behavior against the synthesized fixtures; `unsupported` skips the symlink vectors. |
 | `synthesized/` | Optional synthesized-resource checks. Runs only when the capability manifest declares concrete synthesized fixture paths (for example `/docs/index`) and their expected status/body/header behavior; validates command-parse-beats-synth, exact-file-beats-synth precedence, and 400-is-terminal-no-fallback. |
@@ -544,7 +562,7 @@ shipped as a byte-compatible `.sh` and `.py` variant, §"Interpreter binding") i
 
 | `_lib/` command | Output shape | Used by |
 |-----------------|--------------|---------|
-| tagging transforms — `cat`/`identity`, `grep`, `jq`, `filter`, `count` | stage-tagging contract (below); `grep`/`filter` take `arity 1`, the rest arity 0 | `commands-mf/`, `precedence/` (`grep`), `directories/`, `pipelines/`, `stderr/` (`count`/`filter`) |
+| tagging transforms — `cat`/`identity`, `grep`, `jq`, `filter`, `count`, `dirprobe` | stage-tagging contract (below); `grep`/`filter` take `arity 1`, the rest arity 0; `dirprobe` emits a fixed `dirprobe:` prefix even when stdin is empty | `commands-mf/`, `precedence/` (`grep`), `directories/`, `pipelines/`, `stderr/` (`count`/`filter`) |
 | `linecount` (a `wc` analogue) | **bare** line count only (`^\s*N\s*$`); not stage-tagged — an explicit exception so a direct-file-access and a piped-execution test each have a byte-stable body | `precedence/` (`wc`), `directories/` (`wc`) |
 | argv-echo — `echo1` (arity 1), `echo2` (arity 2), `echoN` (arity *) | `argv=[a|b|...]` (plus file-existence flags for `echo2`) | `commands-arity/`, `commands-query/` |
 | `noisy` | `out:‹record›` to stdout, `err:‹record›` to stderr | `stderr/` |
@@ -628,18 +646,18 @@ recorded reasons (§7.3). `validate-roots --interpreter python3` validates the
 substituted form so the substitution pass itself is covered, not just the
 checked-in `sh` baseline.
 
-**Exception — roots whose behavior under test is the `exec`/interpreter binding.**
-The substitution pass rewrites the materialized `exec` file, so it must **not** be
-applied to a root that exists to test `exec` content itself. `exec-rules/` (§6.1)
-deliberately ships malformed rules, an unresolved-interpreter rule, glob and
-first-match cases whose exact bytes are the assertion; mechanically rewriting them
-would destroy the very thing under test (e.g. "fix" a malformed rule, or rewrite
-the intentionally-unresolvable interpreter token). Such roots are therefore
-**pinned to `sh`**: they declare `requires_interpreter: sh` (§7.3), are copied
-verbatim with no `exec` rewrite, and selected MUST vectors in those roots are
-`UNTESTED` for any implementation that does not declare `sh`. Optional vectors in
-the same roots are `SKIP`. `validate-roots --interpreter <name>` likewise skips
-(does not substitute) an `sh`-pinned root.
+**Roots that test `exec`/interpreter binding.** The substitution pass is
+syntax-aware enough to keep `exec-rules/` portable without rewriting away the
+behavior under test. Rules that bind ordinary fixture commands to the canonical
+`sh` interpreter are rewritten to the selected supported interpreter, exactly as in
+other roots. Malformed-rule fixtures are invalid regardless of interpreter token
+(for example, a one-token rule), so substitution cannot make them valid.
+Unresolved-interpreter fixtures use a reserved sentinel interpreter name such as
+`__wash_missing_interpreter__`; the materializer never substitutes that sentinel
+and `validate-roots` asserts it is not listed in the implementation's
+`interpreters`. A selected MUST vector in `exec-rules/` is therefore `UNTESTED`
+only when the implementation declares no interpreter for which the corpus has
+fixture variants, not merely because it does not support POSIX `sh`.
 
 ### 6.4 Mutability and isolation
 
@@ -698,9 +716,7 @@ parse, no accidental executable bits that would mask "no exec bit needed" tests
 at run time (symlinks, §6.4; case-variant files, §6.6). `validate-roots
 --interpreter <name>` additionally materializes each root through the
 interpreter-substitution pass (§6.3) and validates the substituted tree, so a
-non-`sh` implementation's view of the corpus is checked too. `sh`-pinned roots
-(those declaring `requires_interpreter: sh`, e.g. `exec-rules/`, §6.3) are exempt
-from substitution and are validated only in their checked-in `sh` form.
+non-`sh` implementation's view of the corpus is checked too.
 
 Two kinds of fixture are deliberately **never checked in** and are instead
 synthesized into the materialized tree at run time, because they cannot be
@@ -798,7 +814,14 @@ A vector's `expect` block supports a small, declarative matcher set:
   `status_class` (`success` = any 2xx, `non_error` = any 2xx/3xx,
   `client_error` = any 4xx, `server_error` = any 5xx) where the spec fixes only
   the response class and not the exact code.
-- `body_exact`, `body_contains`, `body_matches` (regex), `body_base64` (binary).
+- `one_of`: a list of complete expectation blocks, exactly one of which must
+  match. This is reserved for spec-permitted alternatives, and each branch must be
+  narrow enough to prove the relevant behavior. For example, the directory-suffix
+  vector can allow either a success branch with `body_contains: "dirprobe:"` or a
+  natural failure branch with an error status and `body_not_contains` guards,
+  instead of accepting a broad uninspected status set.
+- `body_exact`, `body_contains`, `body_not_contains`, `body_matches` (regex),
+  `body_base64` (binary).
 - `body_empty`: assert the response carries no entity body. This is how a HEAD
   vector asserts the omitted body (runtime §9.5) without an empty-string
   comparison that would be ambiguous against a missing body.
@@ -1020,11 +1043,8 @@ harness itself.
   defines the mechanism by which a command signals "this is a full HTTP response"
   versus raw stdout bytes. The harness therefore does not assert this behavior by
   default. The `command_full_http_response.enabled` capability flag records
-  whether an implementation supports it; when an implementation declares the flag
-  *and* provides — through its capability manifest — concrete fixture commands plus
-  the exact status/headers they emit, the harness runs consistency checks against
-  those declarations (mirroring how synthesized resources are gated above).
-  `enabled: true` with an empty `fixtures` list is informational only.
+  whether an implementation supports it, and reports include that declaration, but
+  no shared-corpus vectors are generated from it in v1.
 - **Per-implementation scorecard.** MUST pass rate (must be 100% to be
   "conformant"), SHOULD pass rate, declared optional features and their
   consistency results, an explicit list of skipped optional/implementation-defined
