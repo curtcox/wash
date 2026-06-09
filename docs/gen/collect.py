@@ -213,7 +213,12 @@ IMPLS: dict[str, dict[str, Any]] = {
         "capabilities": REPO / "impls/go/wash.capabilities.json",
         "meta": go_meta,
         "steps": [
-            Step("compilation", "go build ./...", [["go", "build", "./..."]], GO),
+            Step(
+                "compilation",
+                "go build -o bin/wash-server ./cmd/wash-server",
+                [["go", "build", "-o", "bin/wash-server", "./cmd/wash-server"]],
+                GO,
+            ),
             Step(
                 "linting",
                 "gofmt -l + go vet",
