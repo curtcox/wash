@@ -1,5 +1,8 @@
 # wash / Web Shell
 
+[![CI status](https://github.com/curtcox/wash/actions/workflows/conformance.yml/badge.svg)](https://github.com/curtcox/wash/actions/workflows/conformance.yml)
+[Developer site](https://curtcox.github.io/wash/)
+
 A local HTTP server that maps URLs to a project root directory — files, directories,
 and composable command pipelines.
 
