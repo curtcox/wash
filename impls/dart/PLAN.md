@@ -95,11 +95,15 @@ abstract class WashFS {
 
 Two modes are supported; the adapter uses the AOT binary for speed:
 
-- **AOT binary** (used in CI and adapter): `dart compile exe bin/wash_server.dart -o bin/wash-server`
+- **AOT binary** (used in CI and adapter): `dart pub get && dart compile exe bin/wash_server.dart -o bin/wash-server`
   - No SDK required at runtime; comparable startup to the Go binary.
   - The adapter's `start` command points at this pre-built binary.
+  - **`dart pub get` is mandatory before any compile or test.** Unlike Go (which
+    auto-fetches modules on `go build`), Dart cannot compile, run, or test without
+    a resolved `.dart_tool/package_config.json`. This applies even to a "stdlib-only"
+    build because `dart test` needs the `test` package fetched.
 - **JIT dev mode** (local iteration): `dart run bin/wash_server.dart --root <root> --port <port>`
-  - No compile step; useful for quick local tests.
+  - No compile step (but still requires `dart pub get` once); useful for quick local tests.
 
 The adapter always uses the pre-built AOT binary for the same reasons as the Go impl: the harness launches ~22 server processes per full conformance run, and a cold JIT compile on every start would exceed `ready_timeout_sec`.
 
@@ -197,6 +201,18 @@ This table mirrors the Go plan exactly. Source of truth is `harness/conformance/
 
 **Milestones**: Serves static files from root; passes `plain-files` vectors.
 
+> **Land one real test file in this phase.** Unlike Go (`go test ./...` exits 0
+> with no test files, and the Go impl ships none), `dart test` errors with "No
+> tests found" and exits non-zero when the `test/` tree is empty. `test-dart` must
+> not be wired into CI (`test-dart-all`) until at least one test exists, or the
+> job goes red immediately.
+
+> **Sequencing for `validate-capabilities`:** add the
+> `wash-conformance validate-capabilities harness/adapters/dart.toml` line to
+> `make validate` and the CI `validate` job *only after* `impls/dart/dart.toml`
+> and `impls/dart/wash.capabilities.json` exist. Added earlier, it fails the gate
+> before any Dart code is written.
+
 ### Phase 2: Command Path & Metadata
 1. **Command path loading**: `env/path` parsing
 2. **Metadata loader**: `env/meta/*` file reading
@@ -237,8 +253,10 @@ This table mirrors the Go plan exactly. Source of truth is `harness/conformance/
 
 ### Phase 8: CI & Housekeeping
 1. **`dart format`** / **`dart analyze`**: Clean output, no warnings
-2. **CI workflow**: `validate` job validates `dart.toml` capabilities; `conformance-dart` job added (`needs: validate`, runs `make test-dart-all`)
+2. **CI workflow**: `validate` job validates `dart.toml` capabilities; `conformance-dart` job added (`needs: validate`, runs `make test-dart-all`) with a pub-cache step
 3. **`make validate`** includes `wash-conformance validate-capabilities harness/adapters/dart.toml`
+4. **`.gitignore`**: add `impls/dart/bin/wash-server`, `impls/dart/.dart_tool/`, `impls/dart/.packages` (do *not* ignore `impls/dart/bin/`, which holds committed source)
+5. **`.PHONY`**: add `build-dart lint-dart test-dart conformance-dart test-dart-all`
 
 ## Testing Strategy
 
@@ -299,9 +317,11 @@ capabilities = "impls/dart/wash.capabilities.json"
 Dart-specific targets mirror the Go pattern. They are kept out of the `test`
 target (reference gate) so a missing Dart SDK never breaks the reference CI job.
 
+Add the new targets to the `.PHONY` line alongside the existing `build-go …` set.
+
 ```makefile
 build-dart:
-	dart compile exe impls/dart/bin/wash_server.dart -o impls/dart/bin/wash-server
+	cd impls/dart && dart pub get && dart compile exe bin/wash_server.dart -o bin/wash-server
 
 lint-dart:
 	dart analyze impls/dart
@@ -316,11 +336,31 @@ conformance-dart: build-dart
 test-dart-all: lint-dart test-dart conformance-dart
 ```
 
+`build-dart` runs `dart pub get` first and `cd`s into `impls/dart` so pub
+resolves the package config; `dart compile exe` (and `dart test`) fail without it.
+
 `impls/dart/bin/wash-server` is a build artifact — add it to `.gitignore`.
+**Do not blanket-ignore `impls/dart/bin/`** the way `.gitignore` does for
+`impls/go/bin/`: the Dart entry point `bin/wash_server.dart` is committed source
+living in the same directory as the compiled binary. Add these specific entries:
+
+```gitignore
+impls/dart/bin/wash-server
+impls/dart/.dart_tool/
+impls/dart/.packages
+```
 
 ## CI Workflow
 
-Add a `conformance-dart` job to `.github/workflows/conformance.yml`, mirroring `conformance-go`:
+Add a `conformance-dart` job to `.github/workflows/conformance.yml`. The existing
+`conformance-go` and `conformance` jobs run **ubuntu-only**; this job intentionally
+adds a macOS leg via a matrix (better platform coverage for `dart:io` path/symlink
+behavior). That is a deliberate divergence from Go, not strict parity — if cost or
+runner time is a concern, drop `macos-latest` to match the others.
+
+`make test-dart-all` runs `build-dart`, which already invokes `dart pub get`, so no
+separate pub-get step is needed. The pub cache is restored explicitly to keep the
+AOT compile fast (matches the caching row in the Risk Assessment).
 
 ```yaml
 conformance-dart:
@@ -337,6 +377,13 @@ conformance-dart:
     - uses: actions/setup-python@v5
       with:
         python-version: "3.12"
+    - name: Cache pub + build artifacts
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.pub-cache
+          impls/dart/.dart_tool
+        key: pub-${{ matrix.os }}-${{ hashFiles('impls/dart/pubspec.yaml') }}
     - name: Install harness
       run: pip install -e "./harness[dev]"
     - name: Run Dart lint, unit tests, and conformance
@@ -344,7 +391,9 @@ conformance-dart:
 ```
 
 Also add `wash-conformance validate-capabilities harness/adapters/dart.toml` to
-the `validate` job's step list alongside the existing reference and go lines.
+the `validate` job's step list alongside the existing reference and go lines —
+but only once `harness/adapters/dart.toml` and `impls/dart/wash.capabilities.json`
+exist (see Phase 1 sequencing note), or the gate fails before any code lands.
 
 ## Dart-Specific Notes
 
@@ -478,5 +527,5 @@ Key insights from Python reference (`impls/reference/wash/`) and Go port:
 
 ---
 
-**Last Updated**: 2026-06-09 (Plan drafted — no implementation yet)
-**Plan Version**: 1.0
+**Last Updated**: 2026-06-09 (Plan drafted; pre-implementation review corrections applied — no implementation yet)
+**Plan Version**: 1.1
