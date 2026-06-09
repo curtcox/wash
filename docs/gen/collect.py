@@ -482,10 +482,27 @@ def build_detailed_failures(
 
     for rec in impl_records:
         if rec["outcome"] not in {"FAIL", "LAUNCH_FAILURE", "PROCESS_DIED", "UNTESTED"}:
+            # Still count in by_clause for passing records
+            for clause in rec.get("clauses", []):
+                if clause not in by_clause:
+                    by_clause[clause] = {"total": 0, "pass": 0, "fail": 0, "failure_ids": []}
+                by_clause[clause]["total"] += 1
+                by_clause[clause]["pass"] += 1
             continue
 
-        # Get full record details
-        detail = record_to_dict(rec)
+        # Create a copy of the record for the failure detail
+        # The record is already a dict from JSON, so work with it directly
+        detail = dict(rec)
+
+        # Decode base64 body for readability if present
+        actual = detail.get("actual", {})
+        if actual and actual.get("body_base64"):
+            import base64
+            try:
+                decoded = base64.b64decode(actual["body_base64"]).decode("utf-8", errors="replace")
+                actual["body_preview"] = decoded[:500]  # Add preview for readability
+            except Exception:
+                pass
 
         # Add AI context
         detail["ai_context"] = generate_ai_context(rec, records, vectors_by_id)
@@ -497,11 +514,8 @@ def build_detailed_failures(
             if clause not in by_clause:
                 by_clause[clause] = {"total": 0, "pass": 0, "fail": 0, "failure_ids": []}
             by_clause[clause]["total"] += 1
-            if rec["outcome"] in {"FAIL", "LAUNCH_FAILURE", "PROCESS_DIED", "UNTESTED"}:
-                by_clause[clause]["fail"] += 1
-                by_clause[clause]["failure_ids"].append(rec["vector_id"])
-            else:
-                by_clause[clause]["pass"] += 1
+            by_clause[clause]["fail"] += 1
+            by_clause[clause]["failure_ids"].append(rec["vector_id"])
 
     return {
         "summary": summary,
