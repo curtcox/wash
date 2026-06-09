@@ -94,8 +94,10 @@ for impl in implementations:
             server = adapter.launch(impl, root=materialized.path, port=free_port())
             wait_until_ready(server)
             for vector in vector_group:
-                if should_skip(vector, caps):
-                    record SKIP(reason=skip_reason(vector, caps))
+                if cannot_run(vector, caps, materialized):
+                    record unrunnable_outcome(vector, reason)
+                    # SKIP for optional/capability-absent vectors;
+                    # UNTESTED for selected MUST vectors.
                 else:
                     before = materialized.snapshot_if_needed(vector)
                     actual = httpclient.send(server.base_url, vector.request,
@@ -318,9 +320,12 @@ Field notes:
   `http://cross-origin.invalid`, it may override the foreign origin the harness
   sends via an optional `cross_origin_probe` manifest field.
 - `interpreters` lists the interpreters the implementation can resolve through
-  `exec` rules. The harness uses it to **skip** any root whose command scripts
-  require an interpreter the implementation does not declare (§7.3), recording
-  the skip with a reason rather than failing for a permitted limitation.
+  `exec` rules. The harness uses it to materialize command roots with a supported
+  fixture-script language (§6.3). If a selected MUST vector cannot be run because
+  no corpus fixture variant is available for any declared interpreter, the outcome
+  is `UNTESTED`, not a conforming skip; the implementation's conformance claim is
+  incomplete until the vector can run. Optional or capability-absent vectors still
+  use ordinary `SKIP` outcomes with recorded reasons.
 - `put_creates_parents` records whether PUT to a path whose parent directory does
   not yet exist creates the intervening directories. runtime §9.2 leaves this to
   implementation policy, so the MUST-level PUT vectors target paths whose parent
@@ -463,7 +468,7 @@ they run anywhere the adapter's declared interpreters exist.
 |------|------------------------------|
 | `empty/` | Empty root is valid (§4.2). Everything 404s; `/` is dir behavior. |
 | `plain-files/` | Literal file mapping (§6.1), MIME inference, raw bytes, nested paths, dot-segment normalization, root-escape rejection. Trailing-`?` disambiguation (§9.1/Q19): `/file.txt?download=1` strips the query and matches the file first, while a `?` followed by any raw `/` is per-command syntax and prevents the exact-file match. |
-| `directories/` | Directory behavior (§6.5): one dir holding a default file (named from the manifest's `default_index_files`, materialized per-impl), one without (listing or impl-defined, gated on `directory_listing`), trailing-slash equivalence and repeated-slash collapse (§9.1), directory used as an implied-cat suffix `/wc/docs` (§9.4), and `/docs/grep/needle/file.txt` → 404 (no command lookup after directory traversal, §9.2). This root ships its own `env/path` + `wc` (the `linecount` fixture, §6.3) and `grep` (a tagging transform) commands and a real `docs/` directory, so the implied-cat-over-directory and no-command-in-directory vectors both have the fixtures they need. Because §6.5 is implementation-defined, the directory-serving cases run as capability-gated consistency checks, not flat MUST/SHOULD: the listing case asserts only that a non-error response is produced when `directory_listing` is declared (its body format is impl-defined and not matched). The `/wc/docs` implied-cat-over-directory case is likewise implementation-defined — pipeline §9.4 says it "may fail naturally" — so it asserts no fixed status; it checks only that the outcome is deterministic across repeats for a given impl, never failing one status versus another. |
+| `directories/` | Directory behavior (§6.5): one dir holding a default file (named from the manifest's `default_index_files`, materialized per-impl), one without (listing or impl-defined, gated on `directory_listing`), trailing-slash equivalence and repeated-slash collapse (§9.1), directory used as an implied-cat suffix `/wc/docs` (§9.4), and `/docs/grep/needle/file.txt` → 404 (no command lookup after directory traversal, §9.2). This root ships its own `env/path` + `wc` (the `linecount` fixture, §6.3) and `grep` (a tagging transform) commands and a real `docs/` directory, so the implied-cat-over-directory and no-command-in-directory vectors both have the fixtures they need. Because §6.5 permits implementation-defined directory behavior, the directory-serving cases run as capability-gated consistency checks, not flat MUST/SHOULD: when `default_index_files` is nonempty, the default-file vector materializes the first declared name and asserts that `/dir` and `/dir/` serve its fixed marker rather than a listing; when `directory_listing` is declared, the listing case asserts only that a non-error response is produced for a directory without a default file (its body format is impl-defined and not matched). The `/wc/docs` implied-cat-over-directory case is likewise implementation-defined — pipeline §9.4 says it "may fail naturally" — so it asserts no fixed status; it checks only that the outcome is deterministic across repeats for a given impl, never failing one status versus another. |
 | `precedence/` | The §6.2 ladder. Contains a real file `wc` at root, a real file `bin/wc`, a real `grep/docs/file.txt`, and commands `wc`/`grep` on PATH. Proves exact-path-wins, `/bin/wc` serves file, `/grep/docs/file.txt` serves file. |
 | `commands-mf/` | Metadata-free commands only (arity 0). `cat`-style pass-through, identity, line-count. Proves implied cat, multi-stage pipelines, and that path args → 400 (§13.1, §13.2 of pipeline). |
 | `commands-arity/` | Commands with `arity 1`, `arity 2` (diff-like), `arity *`. Proves path-arg consumption, multi-resource via root-relative argv (§10.5), arity-star argv, and that a **path-arity** argument is percent-decoded and passed verbatim even when it contains a decoded `/` — `/echo1/a%2Fb/file.txt` with `echo1` arity 1 passes the single argv `a/b` (§5.1, Q21), distinct from the query-value encoding cases in `commands-query/`. |
@@ -474,9 +479,9 @@ they run anywhere the adapter's declared interpreters exist.
 | `pipelines/` | Realistic multi-stage pipelines (`jq`/`grep`/`wc` analogues with proper metadata) to validate the worked examples in pipeline §12 and runtime §8.4/§16.4. |
 | `stderr/` | Commands that write to stderr; validates `/&` boundary semantics (§8) and `stderr merge` metadata (§5.9), single-boundary scoping, rightmost-prefix rule. |
 | `exit-codes/` | Commands with deterministic exit codes + `exit` maps; validates default nonzero→400, custom maps, and pipefail aggregation (first-in-URL-order wins, §5.4). |
-| `methods/` | Commands declaring `methods GET POST`, GET-only, mutating-with-POST; validates 405, every-stage-must-permit-method, and HEAD-from-GET. The HEAD assertion is made only for the metadata-absent default (GET permitted ⇒ HEAD answered, body omitted), which §9.5 states unambiguously; the vector pairs the HEAD with its GET via `head_of` and asserts header parity plus `body_empty` (§7.1). Whether an *explicit* `methods` list that includes GET but omits HEAD suppresses HEAD is genuinely ambiguous in §9.5 (the suppression sentence conflicts with the GET⇒HEAD default), so the harness does not assert HEAD behavior for explicit-list commands — it is recorded as implementation-defined until the spec resolves it (tracked as audit R8). |
+| `methods/` | Commands declaring `methods GET POST`, GET-only, mutating-with-POST; validates 405, every-stage-must-permit-method, and HEAD-from-GET. The HEAD assertion is made only for the metadata-absent default (GET permitted ⇒ HEAD answered, body omitted), which §9.5 states unambiguously; the vector pairs the HEAD with its GET via `head_of` and asserts matching status, omitted body, and only the explicitly named header expectations (§7.1). Whether an *explicit* `methods` list that includes GET but omits HEAD suppresses HEAD is genuinely ambiguous in §9.5 (the suppression sentence conflicts with the GET⇒HEAD default), so the harness does not assert HEAD behavior for explicit-list commands — it is recorded as implementation-defined until the spec resolves it (tracked as audit R8). |
 | `mutation/` | PUT/DELETE/POST against plain files; validates literal targeting (§9.2/§9.4) and POST-to-plain→405 (§9.3). The MUST-level PUT/DELETE vectors target paths whose parent already exists, so the literal mutation is unambiguous; PUT into a missing parent is a separate vector gated on `put_creates_parents` (§4). Command-governed POST *write* semantics (e.g. the `sort output.txt/input.txt` redirection of §9.3) are command-specific, not defined by the core spec, so they are **not** a core MUST: this root ships a fixture command with declared write behavior and the vector asserts only consistency with that shipped command's contract (it exercises the impl's body/argv plumbing and method gating, not a portable redirection rule). **Run only on disposable copies.** |
-| `exec-rules/` | `exec` interpreter rules: exact basename match, glob match against relative path, first-match-wins, comment/blank handling, malformed rule→500, unresolved interpreter→500 (§7.2, §15.5). Because the `exec` file's exact bytes *are* the assertion, this root is **pinned to `sh`** (`requires_interpreter: sh`) and exempt from the interpreter-substitution pass (§6.3); it is skipped for an implementation that does not declare `sh`. |
+| `exec-rules/` | `exec` interpreter rules: exact basename match, glob match against relative path, first-match-wins, comment/blank handling, malformed rule→500, unresolved interpreter→500 (§7.2, §15.5). Because the `exec` file's exact bytes *are* the assertion, this root is **pinned to `sh`** (`requires_interpreter: sh`) and exempt from the interpreter-substitution pass (§6.3); its selected MUST vectors are `UNTESTED` for an implementation that does not declare `sh`. |
 | `encoding/` | Percent-encoding edge cases: `%5B%5D`, `%2F` in argv vs path, `%3F` literal `?` filename, `%26` literal-`&` command name, decoded NUL/`/` rejection in path segments. A decoded `/` or NUL is valid in an *argument* segment (§5.1, passed verbatim) but invalid in a *filesystem-lookup* segment (§9.1/§12.2); the spec marks the latter "invalid" without fixing a status, so those vectors assert `status_any: [400, 404]` rather than a single class. |
 | `symlinks/` | Symlink policy checks gated on `symlink_policy` and host support. The materializer synthesizes an in-root symlink and a harmless escaping symlink to a sibling bundle file. `reject-escaping` asserts the escaping target is not served (allowed rejection statuses only, and body must not contain the outside bytes); `follow` asserts the declared follow behavior against the synthesized fixtures; `unsupported` skips the symlink vectors. |
 | `synthesized/` | Optional synthesized-resource checks. Runs only when the capability manifest declares concrete synthesized fixture paths (for example `/docs/index`) and their expected status/body/header behavior; validates command-parse-beats-synth, exact-file-beats-synth precedence, and 400-is-terminal-no-fallback. |
@@ -610,8 +615,9 @@ Substitution is purely mechanical because `_lib/` guarantees a byte-compatible
 variant per interpreter and the served command name carries no extension, so the
 `exec` rewrite only changes the interpreter token. A root is materializable for an
 implementation iff every command it serves has a `_lib/` variant for at least one
-interpreter the manifest declares; otherwise the whole root is skipped with a
-recorded reason (§7.3). `validate-roots --interpreter python3` validates the
+interpreter the manifest declares; otherwise the root's optional/capability-gated
+vectors are `SKIP` and its selected MUST vectors are `UNTESTED`, all with
+recorded reasons (§7.3). `validate-roots --interpreter python3` validates the
 substituted form so the substitution pass itself is covered, not just the
 checked-in `sh` baseline.
 
@@ -623,9 +629,10 @@ first-match cases whose exact bytes are the assertion; mechanically rewriting th
 would destroy the very thing under test (e.g. "fix" a malformed rule, or rewrite
 the intentionally-unresolvable interpreter token). Such roots are therefore
 **pinned to `sh`**: they declare `requires_interpreter: sh` (§7.3), are copied
-verbatim with no `exec` rewrite, and are skipped with a recorded reason for any
-implementation that does not declare `sh`. `validate-roots --interpreter <name>`
-likewise skips (does not substitute) an `sh`-pinned root.
+verbatim with no `exec` rewrite, and selected MUST vectors in those roots are
+`UNTESTED` for any implementation that does not declare `sh`. Optional vectors in
+the same roots are `SKIP`. `validate-roots --interpreter <name>` likewise skips
+(does not substitute) an `sh`-pinned root.
 
 ### 6.4 Mutability and isolation
 
@@ -639,6 +646,12 @@ likewise skips (does not substitute) an `sh`-pinned root.
 - After such a vector, the harness diffs the temp tree against the pristine
   fixture to assert either *exactly* the intended mutation or no mutation at all
   (`RT-9.1-get-no-mutate`).
+- The snapshot/diff model compares entry existence, entry type, file bytes,
+  symlink targets, and executable mode bits only when a vector explicitly makes
+  mode relevant. It ignores access times, modification times, creation times,
+  ownership, platform-specific extended attributes, and directory timestamp churn.
+  This keeps mutation assertions about observable served-tree content rather than
+  host filesystem bookkeeping.
 - The diff never ignores changes inside the materialized served-root bundle for a
   vector that asserts `no_mutation` or an exact `mutation`. Paths declared in
   `runtime_artifact_paths` (§4) are shown in diagnostics when they change, but they
@@ -781,11 +794,19 @@ A vector's `expect` block supports a small, declarative matcher set:
   comparison that would be ambiguous against a missing body.
 - `head_of`: names a sibling vector id whose request is the GET equivalent of this
   HEAD. The harness runs both and asserts the HEAD response reproduces the GET's
-  status and headers (notably `Content-Type` and the `Content-Length` describing
-  the body the GET *would* return) while `body_empty` holds. This makes
-  "computed as for GET, body omitted" a real assertion rather than only an
-  empty-body check, and is the matcher the `methods/` HEAD-from-GET vector uses.
+  status while `body_empty` holds. Header checks are limited to headers the vector
+  explicitly names: for example, `Content-Type` may be compared when the GET
+  response declares one, and `Content-Length` may be checked if the HEAD response
+  includes it, but the harness does not require full header parity or require
+  `Content-Length` to be present. This makes "computed as for GET, body omitted" a
+  real assertion without imposing HTTP header choices the spec does not mandate.
 - `header`: exact match; `header_present` / `header_absent`; `header_matches`.
+  Response header names are matched case-insensitively and normalized to lowercase
+  in the result model. Duplicate response headers are preserved as an ordered list
+  of values. A string matcher requires exactly one value for that header; a list
+  matcher requires the same ordered value list. Header values are compared as raw
+  decoded header field values after RFC response parsing, with no MIME- or
+  whitespace-specific normalization unless the matcher says so.
 - `content_type` (with `mime.*` capability awareness — only enforced when the
   implementation declares MIME inference and a mapping for the extension).
 - `no_mutation`: assert the post-request root-tree diff is empty (GET safety).
@@ -847,26 +868,43 @@ common implementation bug is the *wrong* error class:
 
 ### 7.3 Capability-conditional vectors
 
-A vector may carry `requires_capability: directory_listing` (etc.). The harness
-skips (with a recorded reason) when the implementation declares it absent, and
-runs it as a consistency check when present. `forbidden_when` handles the inverse:
-it asserts a header or behavior is **absent** under a given declared capability
-state. Note the harness only ever launches the implementation in its default
+Capability gates are structured predicates, not free-form strings. A vector may
+carry `requires_capability` as either a shorthand boolean path
+(`directory_listing`) or an object predicate:
+
+```yaml
+requires_capability:
+  path: "symlink_policy"
+  equals: "reject-escaping"
+```
+
+Supported predicate operators are `equals`, `not_equals`, `present`, `absent`,
+`nonempty`, `contains`, and `matches_key` (for maps such as `mime.map`). Paths use
+dot notation over the capability manifest. `all` and `any` compose predicates for
+multi-condition cases, such as "MIME inference is by extension and `.json` is in
+the declared map". `forbidden_when` uses the same predicate vocabulary for inverse
+assertions, for example asserting that a response header is absent under a given
+declared capability state.
+
+When a predicate is false for an optional or implementation-defined vector, the
+harness records `SKIP` with the evaluated predicate as the reason. When a
+selected MUST vector is un-runnable because a required interpreter or corpus
+fixture is unavailable, the harness records `UNTESTED` rather than `SKIP` (§10).
+Note the harness only ever launches the implementation in its default
 configuration (§3), so it tests the cross-origin-**disabled** default only — the
 cross-origin response headers must be absent (§13.1) — and never drives a
 cross-origin-enabled launch (there is no adapter or manifest switch to enable it,
 and §3 forbids the adapter from pre-toggling defaults).
 
-A vector (or its root) may carry `requires_interpreter: python3` (etc.). A root is
-skipped wholesale, with the reason recorded, when none of the interpreters the
-corpus can supply for its commands appears in the manifest's `interpreters` list,
-so an implementation is never failed for not running a language it never claimed to
-support. Because `roots/_lib/` ships both `.sh` and `.py` variants of every fixture
-command, the materializer's interpreter-substitution pass (§6.3) can bind a root to
-whichever interpreter the implementation declares; a vector pins a specific
-interpreter via `requires_interpreter` only when the behavior under test is
-interpreter-specific (in which case substitution to another interpreter is not
-attempted and the vector is skipped if that interpreter is absent).
+A vector (or its root) may carry `requires_interpreter: python3` (etc.). Because
+`roots/_lib/` ships both `.sh` and `.py` variants of every fixture command, the
+materializer's interpreter-substitution pass (§6.3) can bind a root to whichever
+interpreter the implementation declares. A vector pins a specific interpreter via
+`requires_interpreter` only when the behavior under test is interpreter-specific
+(in which case substitution to another interpreter is not attempted). If an
+optional or implementation-defined vector cannot run under the declared
+interpreters, it is `SKIP`; if a selected MUST vector cannot run, it is `UNTESTED`
+and blocks a complete conformance claim (§10).
 
 ---
 
@@ -976,7 +1014,10 @@ harness itself.
   `enabled: true` with an empty `fixtures` list is informational only.
 - **Per-implementation scorecard.** MUST pass rate (must be 100% to be
   "conformant"), SHOULD pass rate, declared optional features and their
-  consistency results, and an explicit list of skipped tests with reasons.
+  consistency results, an explicit list of skipped optional/implementation-defined
+  tests with reasons, and an explicit list of `UNTESTED` MUST vectors/clauses. A
+  result set with any `UNTESTED` MUST vector is an incomplete conformance claim,
+  even when every runnable MUST vector passes.
 
 ---
 
@@ -984,12 +1025,14 @@ harness itself.
 
 Three reporters from one result model (`report.py`). Each (impl, root, vector)
 record carries one outcome — `PASS`, `FAIL`, `SKIP` (with reason), `WARN`
-(a failed SHOULD), `TIMEOUT` (§3.1/§8), `LAUNCH_FAILURE` (§3.1, the server never
-became ready), or `PROCESS_DIED` (§3.1, the server was ready but exited or crashed
-mid-group) — so an implementation problem, a permitted skip, a deliberately-slow
-timeout, a broken adapter, and a runtime crash are never conflated. `PROCESS_DIED`
-is not a spec `FAIL`: it carries the captured child output and, like
-`LAUNCH_FAILURE`, points at the process rather than at a clause. `TIMEOUT` records only the neutral
+(a failed SHOULD), `UNTESTED` (a selected MUST vector could not be run by the
+available corpus/interpreter setup), `TIMEOUT` (§3.1/§8), `LAUNCH_FAILURE`
+(§3.1, the server never became ready), or `PROCESS_DIED` (§3.1, the server was
+ready but exited or crashed mid-group) — so an implementation problem, a
+permitted optional skip, incomplete MUST coverage, a deliberately-slow timeout, a
+broken adapter, and a runtime crash are never conflated. `PROCESS_DIED` is not a
+spec `FAIL`: it carries the captured child output and, like `LAUNCH_FAILURE`,
+points at the process rather than at a clause. `TIMEOUT` records only the neutral
 slow-pipeline case (`timeout_means: timeout`); a deadline exceeded where the spec
 requires the request to complete (the default `timeout_means: fail`, e.g. a stage
 blocking because stdin was never closed) is a `FAIL`, since the hang is the
@@ -1004,12 +1047,13 @@ non-conformance itself.
    so CI surfaces regressions per clause.
 
 Optional: a **conformance matrix** (markdown) — implementations as columns,
-clauses as rows, ✓/✗/– (skip) cells — to compare implementations at a glance and
-track an implementation's progress over time.
+clauses as rows, ✓/✗/–/U (skip/untested) cells — to compare implementations at a
+glance and track an implementation's progress over time.
 
-A non-zero exit code if any MUST fails, or if any `LAUNCH_FAILURE` or
-`PROCESS_DIED` occurs (gate for CI — an implementation that cannot stay up cannot
-be called conformant); SHOULD/optional failures are warnings unless `--strict` is
+A non-zero exit code if any MUST fails, if any selected MUST vector is
+`UNTESTED`, or if any `LAUNCH_FAILURE` or `PROCESS_DIED` occurs (gate for CI — an
+implementation that cannot stay up or leaves MUST coverage incomplete cannot be
+called conformant); SHOULD/optional failures are warnings unless `--strict` is
 passed.
 
 ---
