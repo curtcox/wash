@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""Rebuild harness roots to align with conformance vectors."""
+"""Rebuild harness roots to align with conformance vectors.
+
+WARNING: this script removes and rewrites many directories under harness/roots.
+Run it only when intentionally regenerating the canonical fixture corpus, then
+inspect the full diff before keeping the result.
+"""
 
 from __future__ import annotations
 

@@ -5,9 +5,14 @@
 > over HTTP, and reports how faithfully it implements `specs/runtime.md` and
 > `specs/pipeline_parsing.md` — including where it falls short.
 
-Status: planning. Scope of this document: architecture, contracts, the
-root-directory corpus, the test taxonomy, and reporting. No harness code is
-written yet.
+Status: implemented draft. This document began as the architecture plan and now
+records design contracts for the Python conformance harness in
+`harness/conformance/`, the root corpus in `harness/roots/`, and adapter
+manifests in `harness/adapters/`.
+
+For day-to-day agent orientation, start with `../AGENTS.md` and `AGENTS.md` in
+this directory. Keep this file focused on durable architecture and contract
+rationale; do not use it as the canonical command list.
 
 ---
 
