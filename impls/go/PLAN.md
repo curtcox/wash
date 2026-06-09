@@ -15,10 +15,14 @@ This document outlines the implementation plan for a Go port of the wash Web She
 
 ### Module Structure
 
+Module path: `github.com/curtcox/wash/impls/go` (matches the `origin` remote;
+`internal/...` import lines and `internal/` visibility are derived from it).
+
 ```
 impls/go/
-├── go.mod                    # Module definition (go 1.23)
-├── go.sum                    # Dependency checksums (empty for stdlib-only)
+├── go.mod                    # Module github.com/curtcox/wash/impls/go (go 1.23)
+│                             # No go.sum while stdlib-only — the file is absent,
+│                             # not empty; it appears only once a dependency is added.
 ├── wash.capabilities.json    # Capability declaration
 ├── bin/                      # Build artifacts (gitignored): wash-server binary
 ├── cmd/
@@ -135,7 +139,7 @@ they are skipped).
 | RT-10.5-multi-resource | MUST | `parser.consumeArgv`, `executor` | Command may consume multiple root-relative resources via arity |
 | RT-10.6-request-body | MUST | `executor.Pipeline`, `server.Handler` | Request body feeds rightmost stage stdin; **input suffix wins over body** |
 | RT-10.7-url-expr | MUST | `parser.RawCommandParse` | parse-raw consumes remaining URL expression and stops parsing |
-| RT-12.2-request-handling | MUST | `server.Handler`, `parser` | Parse raw request-target; **no `net/url` normalization** before parse |
+| RT-12.2-request-handling | MUST | `server.Handler`, `parser` | Parse the **raw** request-target: read `r.RequestURI`, never `r.URL.Path` (Go's `net/http` path-cleans the latter). No `net/url` normalization before parse |
 | RT-12.2-root-escape | MUST | `filesystem.CheckEscape` | Literal serving rejects paths escaping configured root |
 | RT-12.3-cwd-root | MUST | `executor.Stage` | Command cwd defaults to root for root-relative argv |
 | RT-13.1-cors-default | SHOULD | `server.middleware` | No `Access-Control-Allow-Origin` by default |
@@ -190,7 +194,7 @@ they are skipped).
 
 ## Implementation Order
 
-### Phase 1: Foundation (Week 1)
+### Phase 1: Foundation
 1. **Project skeleton**: `go.mod`, `main.go`, basic HTTP server
 2. **Filesystem module**: Root resolution, exact path lookup, root-escape detection
 3. **Basic file serving**: GET for literal files, MIME inference by extension
@@ -201,7 +205,7 @@ they are skipped).
 
 **Milestones**: Can serve static files from root directory; passes `plain-files` vectors
 
-### Phase 2: Command Path & Metadata (Week 2)
+### Phase 2: Command Path & Metadata
 1. **Command path loading**: `env/path` parsing
 2. **Metadata loader**: `env/meta/*` file reading
 3. **Metadata parser**: Line-oriented format, field validation
@@ -209,7 +213,7 @@ they are skipped).
 
 **Milestones**: Commands resolve from path; metadata loads; basic command execution works
 
-### Phase 3: Pipeline Parsing (Week 3)
+### Phase 3: Pipeline Parsing
 1. **Segment parsing**: Raw target split, percent-decoding, query string extraction
 2. **Precedence ladder**: Exact file → command → synthesized → 404
 3. **Pipeline construction**: Multi-stage pipeline with argv consumption
@@ -217,7 +221,7 @@ they are skipped).
 
 **Milestones**: Complex pipelines parse correctly; passes `pipelines` and `commands-*` vectors
 
-### Phase 4: Execution Engine (Week 4)
+### Phase 4: Execution Engine
 1. **Interpreter rules**: `exec` file parsing, glob matching
 2. **Stage execution**: Subprocess management, stdin/stdout plumbing
 3. **Pipeline plumbing**: Multi-stage data flow, stderr handling
@@ -225,7 +229,7 @@ they are skipped).
 
 **Milestones**: Full pipeline execution; passes `exec-rules`, `exit-codes`, `stderr` vectors
 
-### Phase 5: HTTP Methods & Mutation (Week 5)
+### Phase 5: HTTP Methods & Mutation
 1. **PUT support**: Literal file creation/replacement, parent directory creation
 2. **DELETE support**: File deletion
 3. **POST support**: Command-governed POST handling
@@ -234,7 +238,7 @@ they are skipped).
 
 **Milestones**: Full CRUD support; passes `mutation`, `methods` vectors
 
-### Phase 6: Advanced Features (Week 6)
+### Phase 6: Advanced Features
 1. **Directory handling**: Index files, directory listing
 2. **Symlink support**: Symlink resolution, escape detection
 3. **Error responses**: Content negotiation (JSON vs text)
@@ -243,7 +247,7 @@ they are skipped).
 
 **Milestones**: All advanced features; passes `directories`, `symlinks`, `security` vectors
 
-### Phase 7: Conformance & Polish (Week 7)
+### Phase 7: Conformance & Polish
 1. **Full conformance run**: All MUST/SHOULD vectors
 2. **Performance tuning**: Streaming for large files, pipeline optimization
 3. **Edge cases**: Encoding quirks, malformed input handling
@@ -312,27 +316,55 @@ env         = {}
 capabilities = "impls/go/wash.capabilities.json"
 ```
 
-The binary is produced out-of-band before conformance runs. Add a Makefile
-target and wire it into the CI gate so `harness/adapters/go.toml` always has a
-fresh binary to launch:
+The binary is produced out-of-band before conformance runs. Add Makefile
+targets and wire them into the gate so `harness/adapters/go.toml` always has a
+fresh binary to launch. The existing `lint`/`typecheck`/`unit` targets are
+Python-only (`ruff`/`mypy`/`pytest`); Go needs its own equivalents
+(`gofmt`/`go vet`/`go test`) — none of which exist yet:
 
 ```makefile
 build-go:
 	cd impls/go && go build -o bin/wash-server ./cmd/wash-server
 
+lint-go:
+	cd impls/go && test -z "$$(gofmt -l .)" && go vet ./...
+
+test-go: build-go        # Go unit tests (*_test.go)
+	cd impls/go && go test ./...
+
 conformance-go: build-go
 	wash-conformance run --adapter harness/adapters/go.toml
 ```
 
-`impls/go/bin/` is a build artifact — add it to `.gitignore`. CI runs
-`build-go` before the Go conformance step (mirror the Python job in
-`.github/workflows/conformance.yml`, but with `go build` instead of an editable
-`pip install`). Process cleanup needs no special handling: the harness sends
-`SIGTERM` to the whole process group (`os.killpg`, with `start_new_session=True`),
-so a single compiled binary is reaped cleanly on shutdown.
+**Gate wiring.** `make test` (the repo CI gate per `AGENTS.md`) currently runs
+`validate unit lint typecheck conformance` — all reference-only. Keep the Go
+checks out of that target so a missing Go toolchain never breaks the reference
+gate; instead expose an umbrella `test-go-all` and run it as a **separate CI
+job** alongside (not inside) the reference job:
 
-**Single entry point.** Build from `./cmd/wash-server` only; drop the redundant
-root-level `main.go` from the module tree so there is exactly one `main` package.
+```makefile
+test-go-all: lint-go test-go conformance-go
+```
+
+**CI.** Mirror both halves of `.github/workflows/conformance.yml`, not just the
+`conformance` job:
+
+- The `validate` job must also validate the new adapter/capabilities pair —
+  add `wash-conformance validate-capabilities harness/adapters/go.toml`
+  alongside the existing `reference.toml` line (this needs the harness installed,
+  which the `validate` job already does; no Go toolchain required for it).
+- Add a Go job (`needs: validate`) that runs `actions/setup-go`, then
+  `make test-go-all`. Use `go build` in place of the reference job's editable
+  `pip install`. Process cleanup needs no special handling: the harness sends
+  `SIGTERM` to the whole process group (`os.killpg`, with
+  `start_new_session=True`), so a single compiled binary is reaped cleanly on
+  shutdown.
+
+`impls/go/bin/` is a build artifact — add it to `.gitignore`.
+
+**Single entry point.** No Go sources exist yet (`impls/go/` holds only this
+plan); create exactly one `main` package, at `./cmd/wash-server`, and build only
+from there. Do not add a second root-level `main.go`.
 
 ## Noted External Libraries
 
