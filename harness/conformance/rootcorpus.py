@@ -34,6 +34,7 @@ _EXIT_FAMILY = {f"exit{i}" for i in range(256)}
 _LIB_COMMANDS |= _EXIT_FAMILY
 
 BUNDLE_ROOTS = frozenset({"path-outside"})
+VIRTUAL_ROOTS = frozenset({"empty"})
 
 
 @dataclass
@@ -155,12 +156,16 @@ def ensure_exit_lib() -> None:
 
 def list_roots() -> list[str]:
     base = roots_dir()
+    virtual = set(VIRTUAL_ROOTS)
     if not base.is_dir():
-        return []
+        return sorted(virtual)
     return sorted(
-        p.name
-        for p in base.iterdir()
-        if p.is_dir() and not p.name.startswith("_")
+        virtual
+        | {
+            p.name
+            for p in base.iterdir()
+            if p.is_dir() and not p.name.startswith("_")
+        }
     )
 
 
@@ -174,13 +179,15 @@ def materialize(
 ) -> MaterializedRoot:
     ensure_exit_lib()
     src = roots_dir() / root_name
-    if not src.is_dir():
+    if root_name not in VIRTUAL_ROOTS and not src.is_dir():
         raise FileNotFoundError(f"unknown root: {root_name}")
 
     tmp = Path(tempfile.mkdtemp(prefix=f"wash-root-{root_name}-"))
     bundle_root: Path | None = None
 
-    if root_name in BUNDLE_ROOTS:
+    if root_name in VIRTUAL_ROOTS:
+        material_path = tmp
+    elif root_name in BUNDLE_ROOTS:
         bundle_root = tmp
         served = tmp / "root"
         served.mkdir()
@@ -334,7 +341,8 @@ def validate_roots(*, interpreter: str | None = None) -> list[str]:
 
     for root_name in list_roots():
         root_path = base / root_name
-        errors.extend(_validate_root_tree(root_path, root_name))
+        if root_name not in VIRTUAL_ROOTS:
+            errors.extend(_validate_root_tree(root_path, root_name))
 
         if interpreter:
             try:
@@ -418,6 +426,8 @@ def can_materialize_for_caps(root_name: str, caps: dict[str, Any]) -> tuple[bool
 
 
 def root_commands(root_name: str) -> set[str]:
+    if root_name in VIRTUAL_ROOTS:
+        return set()
     root = roots_dir() / root_name
     cmds: set[str] = set()
     if not root.is_dir():

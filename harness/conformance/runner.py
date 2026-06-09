@@ -24,6 +24,7 @@ from conformance.rootcorpus import (
     can_materialize_for_caps,
     cleanup,
     host_case_sensitive,
+    list_roots,
     materialize,
 )
 from conformance.spec import CLAUSE_REGISTRY, spec_label
@@ -73,7 +74,10 @@ def load_vectors(
 
 def _validate_vector_refs(vectors: list[dict[str, Any]]) -> None:
     ids = {v["id"] for v in vectors}
+    roots = set(list_roots())
     for v in vectors:
+        if v.get("root") not in roots:
+            raise ValueError(f"vector {v['id']}: unknown root {v.get('root')!r}")
         for cid in v.get("clauses", []):
             if cid not in CLAUSE_REGISTRY:
                 raise ValueError(f"vector {v['id']}: unknown clause {cid!r}")
