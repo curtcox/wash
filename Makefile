@@ -1,8 +1,10 @@
-.PHONY: install validate test conformance coverage smoke-reference
+.PHONY: install validate test unit conformance coverage smoke-reference
+
+PYTHON ?= python3
 
 install:
-	pip install -e ./harness[dev]
-	pip install -e ./impls/reference
+	$(PYTHON) -m pip install -e ./harness[dev]
+	$(PYTHON) -m pip install -e ./impls/reference
 
 validate:
 	wash-conformance validate-roots
@@ -13,10 +15,13 @@ validate:
 conformance:
 	wash-conformance run --adapter harness/adapters/reference.toml
 
-test: validate conformance
+unit:
+	cd harness && $(PYTHON) -m pytest -q
+
+test: validate unit conformance
 
 coverage:
 	wash-conformance coverage
 
 smoke-reference:
-	python -m wash.server --root harness/roots/plain-files --port 8080
+	$(PYTHON) -m wash.server --root harness/roots/plain-files --port 8080

@@ -6,35 +6,30 @@ paths and line numbers are cited so they can be re-verified.
 
 ## Prioritized recommendations
 
-### 1. Wire `harness/tests/` into CI and the Makefile
+### 1. Wire `harness/tests/` into CI and the Makefile — Done
 - **Effort: S · Payoff: High**
-- Gap: the import-boundary guard (`harness/tests/test_self.py`) and the
-  pytest-wrapped validators it imports are **never executed automatically**.
-  [`Makefile:16`](../Makefile) defines `test: validate conformance` (no pytest),
-  and [`.github/workflows/conformance.yml`](../.github/workflows/conformance.yml)
-  runs only `validate-*`/`coverage`/`run` — `grep pytest Makefile .github`
-  returns nothing. A regression that makes `conformance` import `wash` would pass
-  CI.
-- First step: add a `unit` Make target and a CI step (draft below).
+- Previous gap: the import-boundary guard (`harness/tests/test_self.py`) and the
+  pytest-wrapped validators it imports were not executed automatically.
+- Implemented: added an overridable `PYTHON ?= python3` setting and `unit`
+  target to [`Makefile`](../Makefile), included `unit` in `test`, and added a
+  "Harness self-tests" CI step in
+  [`.github/workflows/conformance.yml`](../.github/workflows/conformance.yml).
 
-### 2. Add a harness glossary
+### 2. Add a harness glossary — Done
 - **Effort: S · Payoff: Med**
-- Gap: `specs/runtime.md:132` defines *runtime* terms, but the harness vocabulary
-  an agent must understand to edit it — **vector, clause, tier, adapter,
-  capability, materialize, synthesized root, corpus** — is scattered across
-  `harness/PLAN.md` prose with no single greppable definition list. These words
-  appear in nearly every harness file and vector.
-- First step: add a `## Glossary` section to [`harness/AGENTS.md`](../harness/AGENTS.md)
-  (draft below).
+- Previous gap: `specs/runtime.md` defines *runtime* terms, but the harness
+  vocabulary an agent must understand to edit it — **vector, clause, tier,
+  adapter, capability, materialize, synthesized root, corpus** — was scattered
+  across `harness/PLAN.md` prose with no single greppable definition list.
+- Implemented: added a `## Glossary` section to
+  [`harness/AGENTS.md`](../harness/AGENTS.md).
 
-### 3. Add `impls/AGENTS.md` for adding a new implementation
+### 3. Add `impls/AGENTS.md` for adding a new implementation — Done
 - **Effort: S · Payoff: Med**
-- Gap: the entire point of the project is multiple implementations conforming to
-  the spec, but `impls/` contains only `reference/` and has no note on how to add
-  a second implementation or wire its adapter. An agent asked to "add a Go
-  implementation" would have to reverse-engineer the pattern from
-  `harness/adapters/reference.toml` and `impls/reference/pyproject.toml`.
-- First step: add [`impls/AGENTS.md`](../impls/AGENTS.md) (draft below).
+- Previous gap: the project supports multiple implementations conforming to the
+  spec, but `impls/` had no note on how to add a second implementation or wire
+  its adapter.
+- Implemented: added [`impls/AGENTS.md`](../impls/AGENTS.md).
 
 ### 4. Add lint / format / type-check tooling and Make targets
 - **Effort: M · Payoff: Med**
@@ -47,16 +42,15 @@ paths and line numbers are cited so they can be re-verified.
   and `lint`/`format`/`typecheck` Make targets. Prefer enforcing in a linter over
   prose in `AGENTS.md`.
 
-### 5. Document the Python version landscape as a gotcha
+### 5. Document the Python version landscape as a gotcha — Done
 - **Effort: S · Payoff: Low/Med**
-- Gap: three Python versions are in play and nothing says so: both packages
-  declare `requires-python = ">=3.11"`, CI pins `3.12`
-  (`.github/workflows/conformance.yml:15`), and the checked-in local venv is
-  **3.14** (`.venv/lib/python3.14/`). An agent that hits a 3.14-only syntax or
-  stdlib behavior will pass locally and break CI.
-- First step: one bullet under `## Gotchas` in [`AGENTS.md`](../AGENTS.md) stating
-  the support floor (3.11), the CI version (3.12), and that local may be newer.
-  Optionally add a CI version matrix (testing change, lower priority for context).
+- Previous gap: multiple Python versions are in play: both packages declare
+  `requires-python = ">=3.11"`, CI pins `3.12`, and local environments may be
+  newer.
+- Implemented: added a `## Gotchas` bullet in [`AGENTS.md`](../AGENTS.md)
+  stating the support floor (3.11), the CI version (3.12), and that local
+  environments may be newer. The optional CI version matrix remains a separate
+  maintainer decision.
 
 ### 6. Rename `harness/PLAN.md` to `harness/DESIGN.md`
 - **Effort: S · Payoff: Low**
@@ -81,84 +75,19 @@ paths and line numbers are cited so they can be re-verified.
 These maximize payoff-per-effort: four are **S** effort, and #1 fixes a safety
 rail that currently does nothing.
 
-1. **Wire `harness/tests/` into CI and the Makefile** (S · High)
-2. **Add a harness glossary** (S · Med)
-3. **Add `impls/AGENTS.md`** (S · Med)
+1. **Wire `harness/tests/` into CI and the Makefile** (S · High) — Done
+2. **Add a harness glossary** (S · Med) — Done
+3. **Add `impls/AGENTS.md`** (S · Med) — Done
 4. **Add lint / format / type-check tooling** (M · Med)
-5. **Document the Python version landscape** (S · Low/Med)
+5. **Document the Python version landscape** (S · Low/Med) — Done
 
-### Draft content for the top 3
+### Completed changes
 
-#### Top 1 — Make target + CI step
-
-Add to [`Makefile`](../Makefile) (and include `unit` in the `test` aggregate so
-the documented "run the tests" command actually runs them):
-
-```makefile
-.PHONY: install validate test unit conformance coverage smoke-reference
-
-unit:
-	cd harness && python -m pytest -q
-
-test: validate unit conformance
-```
-
-Add a step to the `validate` job in
-[`.github/workflows/conformance.yml`](../.github/workflows/conformance.yml) (the
-`[dev]` extra already installs pytest, so no new install is needed):
-
-```yaml
-      - name: Harness self-tests
-        run: cd harness && python -m pytest -q
-```
-
-#### Top 2 — Glossary section for `harness/AGENTS.md`
-
-```markdown
-## Glossary
-- **Corpus**: the set of canonical fixture roots under `harness/roots/`.
-- **Root**: one top-level directory in the corpus; the filesystem a wash server
-  is pointed at for a group of vectors.
-- **Vector**: a declarative YAML test case in `harness/conformance/vectors/`
-  (request + expected response), validated against `harness/vector.schema.json`.
-- **Clause**: a stable spec-requirement ID (e.g. `RT-6.2-precedence`) registered
-  in `harness/conformance/spec.py`; each clause names its source spec section.
-- **Tier**: a clause's strength — `MUST`, `SHOULD`, or `optional`.
-- **Adapter**: a TOML launch manifest (e.g. `harness/adapters/reference.toml`)
-  telling the harness how to start an implementation over HTTP.
-- **Capability**: an implementation-declared feature flag
-  (`*.capabilities.json`); vectors gate on these where the spec is
-  implementation-defined.
-- **Materialize**: copy/synthesize a root into a temp dir at run time — used for
-  mutation vectors and for case/symlink fixtures that depend on host FS support.
-- **Synthesized root**: a root produced at materialization time by
-  `harness/conformance/rootcorpus.py` rather than stored verbatim on disk.
-```
-
-#### Top 3 — `impls/AGENTS.md`
-
-```markdown
-# AGENTS.md
-
-## Scope
-Each subdirectory is one independent `wash` implementation. `reference/` is the
-minimal Python server. Implementations are black boxes to the harness: it
-launches them over HTTP via an adapter manifest and never imports their code.
-
-## Adding an implementation
-1. Create `impls/<name>/` containing a server that speaks the `wash` HTTP
-   contract in `specs/runtime.md` and `specs/pipeline_parsing.md`.
-2. Declare its capabilities in `impls/<name>/wash.capabilities.json` (validated
-   against `harness/capabilities.schema.json`).
-3. Add `harness/adapters/<name>.toml` with an argv `start` command; paths are
-   relative to the repo root.
-4. Run `wash-conformance validate-capabilities harness/adapters/<name>.toml`
-   then `wash-conformance run --adapter harness/adapters/<name>.toml`.
-
-## Boundary
-Implementations must not import or be imported by the harness. The harness
-treats yours exactly as it treats a third-party server.
-```
+- Added an overridable Makefile Python setting, the `unit` Make target, included
+  it in `test`, and wired the same pytest self-tests into CI.
+- Added the harness glossary in `harness/AGENTS.md`.
+- Added `impls/AGENTS.md` for new implementation authors.
+- Documented the Python support floor and CI version in the root gotchas.
 
 ---
 

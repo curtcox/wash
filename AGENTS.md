@@ -23,6 +23,7 @@ wash-conformance validate-roots
 wash-conformance validate-vectors
 wash-conformance validate-capabilities harness/adapters/reference.toml
 wash-conformance coverage
+cd harness && python -m pytest -q
 wash-conformance run --adapter harness/adapters/reference.toml
 ```
 
@@ -40,4 +41,5 @@ python -m wash.server --root harness/roots/plain-files --port 8080
 - Some case and symlink fixtures are synthesized at materialization time.
 - `harness/roots/_lib/exit*.sh` and `harness/roots/_lib/exit*.py` are generated on demand and intentionally ignored.
 - The default local Python may not have harness dependencies until the editable installs above are run.
+- Supported Python starts at 3.11, CI currently runs 3.12, and local environments may be newer; avoid syntax or stdlib behavior that would fail on the support floor or CI version.
 - No strict commit format is documented for this repo.

@@ -6,6 +6,17 @@ This directory contains the Python conformance harness, schemas, adapter manifes
 ## Package Boundary
 Keep the harness independent from every implementation. Code under `harness/conformance/` must not `import wash`; launch the reference implementation through `harness/adapters/reference.toml` the same way a third-party implementation is launched.
 
+## Glossary
+- **Corpus**: the set of canonical fixture roots under `harness/roots/`.
+- **Root**: one top-level directory in the corpus; the filesystem a wash server is pointed at for a group of vectors.
+- **Vector**: a declarative YAML test case in `harness/conformance/vectors/` (request plus expected response), validated against `harness/vector.schema.json`.
+- **Clause**: a stable spec-requirement ID, such as `RT-6.2-precedence`, registered in `harness/conformance/spec.py`; each clause names its source spec section.
+- **Tier**: a clause's strength: `MUST`, `SHOULD`, or `optional`.
+- **Adapter**: a TOML launch manifest, such as `harness/adapters/reference.toml`, telling the harness how to start an implementation over HTTP.
+- **Capability**: an implementation-declared feature flag in `*.capabilities.json`; vectors gate on these where the spec is implementation-defined.
+- **Materialize**: copy or synthesize a root into a temp dir at run time; used for mutation vectors and for case/symlink fixtures that depend on host filesystem support.
+- **Synthesized root**: a root produced at materialization time by `harness/conformance/rootcorpus.py` rather than stored verbatim on disk.
+
 ## Vector Authoring Checklist
 - Put declarative tests under `harness/conformance/vectors/`.
 - Validate each vector against `harness/vector.schema.json`.

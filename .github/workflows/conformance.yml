@@ -21,6 +21,8 @@ jobs:
           wash-conformance validate-vectors
           wash-conformance validate-capabilities harness/adapters/reference.toml
           wash-conformance coverage
+      - name: Harness self-tests
+        run: cd harness && python -m pytest -q
 
   conformance:
     runs-on: ubuntu-latest
