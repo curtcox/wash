@@ -469,5 +469,5 @@ Key insights from Python reference (`impls/reference/wash/`):
 
 ---
 
-**Last Updated**: 2026-06-09 (Phase 8 complete)  
+**Last Updated**: 2026-06-09 (Phase 8 complete — verified: 112/112 MUST, 1/1 SHOULD passing)  
 **Plan Version**: 1.1
