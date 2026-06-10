@@ -34,7 +34,7 @@ from conformance.report import (
 )
 from conformance.rootcorpus import (
     MaterializedRoot,
-    can_materialize_for_caps,
+    can_materialize_for_interpreters,
     cleanup,
     host_case_sensitive,
     list_roots,
@@ -159,14 +159,18 @@ def run(
         roots_needed = sorted({v["root"] for v in vectors})
         for root_name in roots_needed:
             root_vectors = [v for v in vectors if v["root"] == root_name]
-            mat_ok, mat_reason = can_materialize_for_caps(root_name, caps)
+            mat_ok, mat_reason = can_materialize_for_interpreters(
+                root_name, adapter.interpreters
+            )
             case_ok = host_case_sensitive()
 
             for group in isolation_groups(root_vectors):
                 materialized: MaterializedRoot | None = None
                 server: LaunchedServer | None = None
                 try:
-                    materialized = materialize(root_name, caps=caps)
+                    materialized = materialize(
+                        root_name, caps=caps, interpreters=adapter.interpreters
+                    )
                     server = launch(adapter, root=str(materialized.path), caps=caps)
                 except LaunchError as exc:
                     for v in group:
@@ -202,6 +206,7 @@ def run(
                         materializable=mat_ok,
                         materialize_reason=mat_reason,
                         host_case_ok=case_ok,
+                        interpreters=adapter.interpreters,
                     )
                     if not runnable:
                         outcome = (

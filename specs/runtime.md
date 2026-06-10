@@ -174,6 +174,13 @@ text root/arbitrary.txt
 
 and returns the raw file.
 
+A literal file response must set Content-Type. The media type is resolved in this order:
+
+1. A matching suffix entry in root/env/mime, if that file is present (§7.4).
+2. The default entry in root/env/mime, if present.
+3. The built-in fallback table (§7.4).
+4. application/octet-stream.
+
 ### 6.2 Command Shadowing
 
 An exact full-path filesystem resource always wins first (see §6.3). Command parsing begins only when the complete request path does not resolve to a file. The resolution precedence ladder is (see also pipeline_parsing.md §9.5):
@@ -227,13 +234,13 @@ Implementations may synthesize responses for missing paths through implementatio
 
 ### 6.5 Directories
 
-When a request resolves to a directory, the default behavior is:
+When a request resolves to a directory, the behavior is:
 
-1. If an index.html (or analogous configured default file) is present, serve it.
-2. Otherwise, produce a directory listing.
-3. Implementations may substitute other implementation-defined behavior.
+1. If an index file is present, serve it. Index file names come from root/env/index when present (§7.5); otherwise the single default name index.html applies. An index file is served with the Content-Type rules of §6.1.
+2. Otherwise, if directory listings are enabled (the default; see root/env/listing, §7.6), produce a directory listing.
+3. Otherwise, return 404 Not Found.
 
-A configured default file takes precedence over a directory listing when both are possible.
+An index file takes precedence over a directory listing when both are possible. The format of a directory listing is implementation-defined.
 
 ## 7. Directory Layout
 
@@ -304,6 +311,46 @@ The defined metadata fields are (see pipeline_parsing.md §5.6):
 text arity input output methods mime mutates parse-mode stderr exit 
 
 The line-oriented grammar (comments, whitespace-separated tokens, duplicate handling, and malformed-value behavior) and the normative field list are specified in pipeline_parsing.md §5.5 and §5.6. The format remains readable and Git-friendly.
+
+### 7.4 MIME Map
+
+If present, a per-root MIME map may be stored at:
+
+text root/env/mime
+
+The file is line-oriented. Blank lines are ignored, and a line whose first non-whitespace character is # is a comment. Each rule line has one of two forms:
+
+text <suffix> <media-type> default <media-type>
+
+A suffix begins with a dot (for example .html) and matches the final suffix of a file name case-insensitively. A default line replaces the built-in default of application/octet-stream. When the same suffix or default appears more than once, the last occurrence wins.
+
+A malformed line (wrong token count, a suffix not beginning with a dot, or a media type containing no /) makes the file invalid; a request whose response Content-Type would be resolved through it returns 500 Internal Server Error.
+
+When root/env/mime is absent, or when it is present but a name matches none of its suffix entries and it declares no default, the built-in fallback table applies:
+
+text .html text/html .htm text/html .txt text/plain .md text/markdown .json application/json .css text/css .js text/javascript .mjs text/javascript .svg image/svg+xml .xml application/xml .png image/png .jpg image/jpeg .jpeg image/jpeg .gif image/gif .webp image/webp .ico image/x-icon .pdf application/pdf .wasm application/wasm
+
+Names matching no entry are served as application/octet-stream.
+
+### 7.5 Index Files
+
+If present, directory index file names may be stored at:
+
+text root/env/index
+
+The file is line-oriented. Blank lines are ignored, and a line whose first non-whitespace character is # is a comment. Each remaining line names one candidate index file. Candidates are tried in file order; the first name that exists in the requested directory is served (§6.5). A line containing a slash, backslash, or NUL, or naming . or .., makes the file invalid; a directory request resolved through it returns 500 Internal Server Error.
+
+When root/env/index is absent, the single default candidate is index.html. An empty file (no candidate lines) disables index files for the root.
+
+### 7.6 Directory Listing Toggle
+
+If present, the directory listing toggle may be stored at:
+
+text root/env/listing
+
+The file is line-oriented. Blank lines are ignored, and a line whose first non-whitespace character is # is a comment. The file must contain exactly one remaining line, holding the single token on or off. Any other content makes the file invalid; a directory request resolved through it returns 500 Internal Server Error.
+
+When root/env/listing is absent, listings are enabled. When listings are disabled and no index file matches, a directory request returns 404 Not Found (§6.5).
 
 ## 8. URL Grammar and Examples
 
@@ -922,7 +969,8 @@ Many questions originally listed here are now resolved by pipeline_parsing.md or
 - Syntax and semantics of /& → prefix form (pipeline_parsing.md §8 and §8.8 above).
 - Command metadata grammar and normative field list → pipeline_parsing.md §5.5, §5.6.
 - Default behavior for POST to ordinary directories or files → 405 unless a command governs the path (§9.3).
-- Directory listing vs. index.html precedence → default file wins, fallback listing (§6.5).
+- Directory listing vs. index-file precedence → index file wins, fallback listing (§6.5).
+- Literal-file Content-Type resolution and env/mime, env/index, env/listing grammar → §6.1, §7.4–§7.6.
 - Exec interpreter-rule grammar and matching → §7.2.
 - Conventional explain/debug command → optional in v1 (§16.8).
 - Non-command reusable URL fragments → outside v1 (§14.1).

@@ -52,8 +52,14 @@ CLAUSE_REGISTRY: dict[str, Clause] = {
     "RT-6.5-dir-index": Clause(
         "RT-6.5-dir-index",
         "runtime §6.5",
-        "optional",
-        "declared default index file takes precedence over directory listing",
+        "MUST",
+        "index file takes precedence over directory listing",
+    ),
+    "RT-6.1-mime-fallback": Clause(
+        "RT-6.1-mime-fallback",
+        "runtime §6.1",
+        "MUST",
+        "literal file Content-Type from built-in fallback table when env/mime absent",
     ),
     # runtime §7
     "RT-7.1-command-path": Clause(
@@ -67,6 +73,30 @@ CLAUSE_REGISTRY: dict[str, Clause] = {
         "runtime §7.2",
         "MUST",
         "interpreter rules first-match-wins; malformed rule → 500",
+    ),
+    "RT-7.4-env-mime": Clause(
+        "RT-7.4-env-mime",
+        "runtime §7.4",
+        "MUST",
+        "env/mime suffix and default entries set literal-file Content-Type",
+    ),
+    "RT-7.4-env-mime-malformed": Clause(
+        "RT-7.4-env-mime-malformed",
+        "runtime §7.4",
+        "MUST",
+        "malformed env/mime → 500 for responses resolved through it",
+    ),
+    "RT-7.5-env-index": Clause(
+        "RT-7.5-env-index",
+        "runtime §7.5",
+        "MUST",
+        "env/index names directory index candidates, first existing wins",
+    ),
+    "RT-7.6-env-listing": Clause(
+        "RT-7.6-env-listing",
+        "runtime §7.6",
+        "MUST",
+        "env/listing off disables listings; index-less directory → 404",
     ),
     # runtime §9 lifecycle
     "RT-9.1-get-no-mutate": Clause(

@@ -7,10 +7,7 @@
   "required": [
     "spec_version",
     "origin_form",
-    "directory_listing",
-    "default_index_files",
     "synthesized_resources",
-    "mime",
     "options_cors",
     "symlink_policy",
     "case_sensitive_lookup",
@@ -21,7 +18,6 @@
     "deletes_enabled",
     "put_creates_parents",
     "runtime_artifact_paths",
-    "interpreters",
     "command_full_http_response"
   ],
   "properties": {
@@ -37,11 +33,6 @@
       "type": "string",
       "format": "uri"
     },
-    "directory_listing": { "type": "boolean" },
-    "default_index_files": {
-      "type": "array",
-      "items": { "$ref": "#/$defs/safe_filename" }
-    },
     "synthesized_resources": {
       "type": "object",
       "additionalProperties": false,
@@ -52,22 +43,6 @@
           "type": "array",
           "items": { "$ref": "#/$defs/synthesized_fixture" }
         }
-      }
-    },
-    "mime": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["inference", "map", "default"],
-      "properties": {
-        "inference": {
-          "type": "string",
-          "enum": ["by-extension", "none"]
-        },
-        "map": {
-          "type": "object",
-          "additionalProperties": { "type": "string" }
-        },
-        "default": { "type": "string" }
       }
     },
     "options_cors": {
@@ -99,12 +74,6 @@
       "type": "array",
       "items": { "$ref": "#/$defs/root_relative_path" }
     },
-    "interpreters": {
-      "type": "array",
-      "items": { "type": "string", "minLength": 1 },
-      "minItems": 1,
-      "uniqueItems": true
-    },
     "command_full_http_response": {
       "type": "object",
       "additionalProperties": false,
@@ -115,11 +84,6 @@
     }
   },
   "$defs": {
-    "safe_filename": {
-      "type": "string",
-      "minLength": 1,
-      "pattern": "^(?![./\\\\])([^/\\\\\\x00-\\x1f\\x7f]+)$"
-    },
     "root_relative_path": {
       "type": "string",
       "minLength": 1,

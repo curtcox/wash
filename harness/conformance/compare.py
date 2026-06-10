@@ -67,7 +67,7 @@ def compare_expectation(
     failures.extend(_match_status(expect, actual.status))
     failures.extend(_match_body(expect, actual))
     failures.extend(_match_headers(expect, actual))
-    failures.extend(_match_content_type(expect, actual, caps))
+    failures.extend(_match_content_type(expect, actual))
     failures.extend(_match_tree(expect, before, after))
     failures.extend(_match_pipeline_header(expect, actual, caps))
     failures.extend(_match_error_body(expect, actual))
@@ -158,13 +158,8 @@ def _match_headers(expect: dict[str, Any], actual: HttpSnapshot) -> list[str]:
     return failures
 
 
-def _match_content_type(
-    expect: dict[str, Any], actual: HttpSnapshot, caps: dict[str, Any]
-) -> list[str]:
+def _match_content_type(expect: dict[str, Any], actual: HttpSnapshot) -> list[str]:
     if "content_type" not in expect:
-        return []
-    mime = caps.get("mime", {})
-    if mime.get("inference") == "none":
         return []
     want = expect["content_type"]
     got = actual.headers.get("content-type", [""])[0].split(";")[0].strip()
@@ -261,6 +256,7 @@ def vector_runnable(
     materializable: bool,
     materialize_reason: str = "",
     host_case_ok: bool = True,
+    interpreters: list[str] | None = None,
 ) -> tuple[bool, str, str]:
     """Return (runnable, skip_kind, reason). skip_kind is '' | 'SKIP' | 'UNTESTED'."""
     if vector.get("forbidden_when"):
@@ -278,7 +274,7 @@ def vector_runnable(
 
     req_interp = vector.get("requires_interpreter")
     if req_interp:
-        if req_interp not in caps.get("interpreters", []):
+        if req_interp not in (interpreters or []):
             tier = vector.get("tier", "optional")
             kind = "UNTESTED" if tier == "MUST" else "SKIP"
             return False, kind, f"requires_interpreter {req_interp!r} not declared"

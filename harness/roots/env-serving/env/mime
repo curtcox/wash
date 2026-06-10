@@ -1,0 +1,3 @@
+# wash-fixture: per-root mime map
+.dat application/x-wash
+default text/x-fallback

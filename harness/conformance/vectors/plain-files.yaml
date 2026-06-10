@@ -59,20 +59,25 @@
     no_mutation: true
 
 - id: plain-mime-json
-  clauses: [RT-6.1-literal-file]
+  clauses: [RT-6.1-literal-file, RT-6.1-mime-fallback]
   tier: MUST
   root: plain-files
-  requires_capability:
-    all:
-      - path: mime.inference
-        equals: by-extension
-      - path: mime.map
-        matches_key: ".json"
   request: { method: GET, target: "/data.json" }
   expect:
     status: 200
     body_exact: '{"sample":true,"name":"data"}'
     content_type: application/json
+    no_mutation: true
+
+- id: plain-mime-html
+  clauses: [RT-6.1-literal-file, RT-6.1-mime-fallback]
+  tier: MUST
+  root: plain-files
+  request: { method: GET, target: "/page.html" }
+  expect:
+    status: 200
+    body_exact: "<html>wash-sample</html>\n"
+    content_type: text/html
     no_mutation: true
 
 - id: plain-root-escape-parent

@@ -7,3 +7,4 @@ ready_timeout_sec = 10
 cwd         = "."
 env         = {}
 capabilities = "impls/go/wash.capabilities.json"
+interpreters = ["sh", "python3"]

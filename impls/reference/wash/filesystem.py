@@ -8,11 +8,32 @@ from pathlib import Path
 from typing import Literal
 from urllib.parse import unquote_to_bytes
 
-MIME_MAP: dict[str, str] = {
-    ".txt": "text/plain",
-    ".json": "application/json",
-}
 MIME_DEFAULT = "application/octet-stream"
+FALLBACK_MIME_TABLE: dict[str, str] = {
+    ".html": "text/html",
+    ".htm": "text/html",
+    ".txt": "text/plain",
+    ".md": "text/markdown",
+    ".json": "application/json",
+    ".css": "text/css",
+    ".js": "text/javascript",
+    ".mjs": "text/javascript",
+    ".svg": "image/svg+xml",
+    ".xml": "application/xml",
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".gif": "image/gif",
+    ".webp": "image/webp",
+    ".ico": "image/x-icon",
+    ".pdf": "application/pdf",
+    ".wasm": "application/wasm",
+}
+DEFAULT_INDEX_NAMES = ["index.html"]
+
+
+class EnvConfigError(Exception):
+    """A malformed root/env serving-config file (mime, index, listing)."""
 
 
 class PathSegmentError(Exception):
@@ -190,9 +211,73 @@ def try_exact_filesystem(
     return None
 
 
-def infer_mime(path: Path) -> str:
+def _env_config_lines(path: Path) -> list[str]:
+    lines: list[str] = []
+    for raw in path.read_text(encoding="utf-8", errors="replace").splitlines():
+        stripped = raw.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        lines.append(stripped)
+    return lines
+
+
+def load_mime_config(root: Path) -> tuple[dict[str, str], str | None]:
+    """Parse root/env/mime per runtime.md §7.4: (suffix map, declared default)."""
+    mime_file = root / "env" / "mime"
+    mapping: dict[str, str] = {}
+    default: str | None = None
+    if not mime_file.is_file():
+        return mapping, default
+    for line in _env_config_lines(mime_file):
+        tokens = line.split()
+        if len(tokens) != 2:
+            raise EnvConfigError(f"malformed env/mime line: {line!r}")
+        key, media_type = tokens
+        if "/" not in media_type:
+            raise EnvConfigError(f"malformed env/mime media type: {media_type!r}")
+        if key == "default":
+            default = media_type
+        elif key.startswith(".") and len(key) > 1:
+            mapping[key.lower()] = media_type
+        else:
+            raise EnvConfigError(f"malformed env/mime suffix: {key!r}")
+    return mapping, default
+
+
+def load_index_names(root: Path) -> list[str]:
+    """Parse root/env/index per runtime.md §7.5; absent -> ["index.html"]."""
+    index_file = root / "env" / "index"
+    if not index_file.is_file():
+        return list(DEFAULT_INDEX_NAMES)
+    names: list[str] = []
+    for line in _env_config_lines(index_file):
+        if "/" in line or "\\" in line or "\x00" in line or line in {".", ".."}:
+            raise EnvConfigError(f"malformed env/index entry: {line!r}")
+        names.append(line)
+    return names
+
+
+def listing_enabled(root: Path) -> bool:
+    """Parse root/env/listing per runtime.md §7.6; absent -> enabled."""
+    listing_file = root / "env" / "listing"
+    if not listing_file.is_file():
+        return True
+    lines = _env_config_lines(listing_file)
+    if len(lines) != 1 or lines[0] not in {"on", "off"}:
+        raise EnvConfigError("malformed env/listing: expected single on/off token")
+    return lines[0] == "on"
+
+
+def infer_mime(path: Path, root: Path | None = None) -> str:
+    """Resolve Content-Type per runtime.md §6.1 resolution order."""
     ext = path.suffix.lower()
-    return MIME_MAP.get(ext, MIME_DEFAULT)
+    if root is not None:
+        mapping, default = load_mime_config(root)
+        if ext in mapping:
+            return mapping[ext]
+        if default is not None:
+            return default
+    return FALLBACK_MIME_TABLE.get(ext, MIME_DEFAULT)
 
 
 def infer_mime_from_bytes(data: bytes, declared: str | None = None) -> str:

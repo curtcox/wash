@@ -1,23 +1,18 @@
 - id: dir-default-index
   clauses: [RT-6.5-dir-index, PP-9.1-slash-collapse]
-  tier: optional
+  tier: MUST
   root: directories
-  requires_capability:
-    path: default_index_files
-    nonempty: true
   request: { method: GET, target: "/with-index" }
   expect:
     status: 200
     body_exact: "wash-fixture: default-index\n"
+    content_type: text/html
     no_mutation: true
 
 - id: dir-default-index-trailing-slash
   clauses: [PP-9.1-slash-collapse]
   tier: MUST
   root: directories
-  requires_capability:
-    path: default_index_files
-    nonempty: true
   request: { method: GET, target: "/with-index/" }
   expect:
     status: 200
@@ -26,9 +21,8 @@
 
 - id: dir-listing-no-index
   clauses: [RT-6.5-dir-index]
-  tier: optional
+  tier: MUST
   root: directories
-  requires_capability: directory_listing
   request: { method: GET, target: "/no-index" }
   expect:
     status_class: non_error

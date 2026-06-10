@@ -264,17 +264,18 @@ behavior plus whatever the implementation has declared.
 
 The fields whose values are drawn from a fixed set are **closed enumerations** in
 `capabilities.schema.json`, so `validate-capabilities` rejects an unknown value
-rather than silently accepting it: `mime.inference` ∈ {`by-extension`, `none`};
-`options_cors` ∈ {`implementation-defined`, `disabled`}; `symlink_policy` ∈
+rather than silently accepting it: `options_cors` ∈ {`implementation-defined`, `disabled`}; `symlink_policy` ∈
 {`reject-escaping`, `follow`, `unsupported`}; `error_body_formats` entries are
 media-type strings drawn from {`text/plain`, `application/json`}. Free-form fields
-(`map`, `interpreters`, `runtime_artifact_paths`, `default_index_files`) stay open
-for values, but not for shape or safety: any field later used as a filesystem path
-is schema-validated according to its role (single filename vs. root-relative path
-list), with absolute paths, empty names, `.`/`..` segments, backslashes, NULs, and
-control bytes rejected before materialization. The schema is the source of truth for
-these sets; this list is illustrative of the shape, and the schema must be authored
-to match in phase 1 (§12).
+(`runtime_artifact_paths`) stay open for values, but not for shape or safety:
+filesystem paths are schema-validated according to their role, with absolute
+paths, empty names, `.`/`..` segments, backslashes, NULs, and control bytes
+rejected before materialization. MIME maps, index names, directory-listing policy,
+and interpreter availability are not conformance claims in this manifest: serving
+behavior is read from each root's `env/` files, and interpreter availability lives
+in the adapter TOML. The schema is the source of truth for these sets; this list is
+illustrative of the shape, and the schema must be authored to match in phase 1
+(§12).
 
 `wash.capabilities.json`:
 
@@ -282,14 +283,7 @@ to match in phase 1 (§12).
 {
   "spec_version": "1",
   "origin_form": "http://127.0.0.1",
-  "directory_listing": true,
-  "default_index_files": ["index.html"],
   "synthesized_resources": { "enabled": false, "fixtures": [] },
-  "mime": {
-    "inference": "by-extension",
-    "map": { ".txt": "text/plain", ".json": "application/json" },
-    "default": "application/octet-stream"
-  },
   "options_cors": "implementation-defined",
   "symlink_policy": "reject-escaping",
   "case_sensitive_lookup": true,
@@ -300,7 +294,6 @@ to match in phase 1 (§12).
   "deletes_enabled": true,
   "put_creates_parents": true,
   "runtime_artifact_paths": [],
-  "interpreters": ["sh", "python3"],
   "command_full_http_response": { "enabled": false }
 }
 ```
@@ -335,13 +328,6 @@ Field notes:
   contains a path/query/fragment/userinfo component, that embeds a port, or whose
   host is not a loopback literal/name accepted by the adapter lifecycle. The
   launch port always comes from the harness, never from the manifest.
-- `interpreters` lists the interpreters the implementation can resolve through
-  `exec` rules. The harness uses it to materialize command roots with a supported
-  fixture-script language (§6.3). If a selected MUST vector cannot be run because
-  no corpus fixture variant is available for any declared interpreter, the outcome
-  is `UNTESTED`, not a conforming skip; the implementation's conformance claim is
-  incomplete until the vector can run. Optional or capability-absent vectors still
-  use ordinary `SKIP` outcomes with recorded reasons.
 - `put_creates_parents` records whether PUT to a path whose parent directory does
   not yet exist creates the intervening directories. runtime §9.2 leaves this to
   implementation policy, so the MUST-level PUT vectors target paths whose parent
@@ -357,11 +343,6 @@ Field notes:
   bundle still fails `RT-9.1-get-no-mutate`; implementations that cache generated
   results should keep that cache outside the served tree or behind an internal
   store not visible to the corpus diff.
-- `default_index_files` entries are filenames, not paths. Each entry must be a
-  single safe relative name with no slash, backslash, dot segment, empty string, or
-  NUL/control byte. The materializer writes only under the intended directory in
-  the temp root, and validation fails before any fixture is created if the manifest
-  supplies an unsafe name.
 - `max_error_body_bytes` is the implementation's declared cap on diagnostic
   body bytes (runtime §10.3 recommends 8 KiB, truncation indicated). The harness
   records it and enforces it as a SHOULD-tier consistency check against the
@@ -404,10 +385,11 @@ How tiers use it:
   a hard failure, and is highlighted in the report.
 - **Optional/implementation-defined tests** run only when the manifest declares
   the relevant capability, and they assert *internal consistency with the
-  declaration* (e.g. "you said `directory_listing: true`, so a directory with no
-  index must produce a listing"; "you said `mime.map` maps `.json`, so
-  `/data.json` must return that type"). If a capability is declared absent, the
-  matching tests are skipped and recorded as such.
+  declaration* (for example, a declared symlink policy or concrete synthesized
+  resource fixture). If a capability is declared absent, the matching tests are
+  skipped and recorded as such. Literal-file MIME, directory index selection, and
+  directory-listing policy are no longer manifest capabilities; they are
+  normative behavior driven by root-local `env/` files.
 
 This makes the harness fair (no penalty for permitted choices) while still
 catching the most common real bug: behavior that contradicts the
@@ -498,7 +480,10 @@ they run anywhere the adapter's declared interpreters exist.
 |------|------------------------------|
 | `empty/` | Empty root is valid (§4.2). Everything 404s; `/` is dir behavior. |
 | `plain-files/` | Literal file mapping (§6.1), MIME inference, raw bytes, nested paths, dot-segment normalization, root-escape rejection. Trailing-`?` disambiguation (§9.1/Q19): `/file.txt?download=1` strips the query and matches the file first, while a `?` followed by any raw `/` is per-command syntax and prevents the exact-file match. |
-| `directories/` | Directory behavior (§6.5): one dir holding a default file (named from the manifest's `default_index_files`, materialized per-impl), one without (listing or impl-defined, gated on `directory_listing`), trailing-slash equivalence and repeated-slash collapse (§9.1), directory used as an implied-cat suffix `/dirprobe/docs` (§9.4), and `/docs/grep/needle/file.txt` → 404 (no command lookup after directory traversal, §9.2). This root ships its own `env/path` + `dirprobe` (a fixture command that emits a fixed `dirprobe:` prefix before echoing any stdin) and `grep` (a tagging transform) commands and a real `docs/` directory, so the implied-cat-over-directory and no-command-in-directory vectors both have the fixtures they need. Because §6.5 permits implementation-defined directory behavior, the directory-serving cases run as capability-gated consistency checks, not flat MUST/SHOULD: when `default_index_files` is nonempty, the default-file vector materializes the first declared name and asserts that `/dir` and `/dir/` serve its fixed marker rather than a listing; when `directory_listing` is declared, the listing case asserts only `status_class: non_error` for a directory without a default file (its body format is impl-defined and not matched). The `/dirprobe/docs` implied-cat-over-directory case uses `one_of` expectations (§7.1) rather than a broad status wildcard: a success response must contain the `dirprobe:` marker, proving command execution rather than direct directory serving; a natural directory-read failure may return an error status, but the body must not contain the fixed direct-directory marker or default-index marker. |
+| `directories/` | Directory behavior (§6.5): one dir holding `index.html`, one without an index (listing enabled by default), trailing-slash equivalence and repeated-slash collapse (§9.1), directory used as an implied-cat suffix `/dirprobe/docs` (§9.4), and `/docs/grep/needle/file.txt` → 404 (no command lookup after directory traversal, §9.2). This root ships its own `env/path` + `dirprobe` (a fixture command that emits a fixed `dirprobe:` prefix before echoing any stdin) and `grep` (a tagging transform) commands and a real `docs/` directory, so the implied-cat-over-directory and no-command-in-directory vectors both have the fixtures they need. Directory serving is now normative: an index file wins over listing, an index-less directory lists when `env/listing` is absent or `on`, and roots can disable listing with `env/listing off`. The `/dirprobe/docs` implied-cat-over-directory case uses `one_of` expectations (§7.1) rather than a broad status wildcard: a success response must contain the `dirprobe:` marker, proving command execution rather than direct directory serving; a natural directory-read failure may return an error status, but the body must not contain the fixed direct-directory marker or default-index marker. |
+| `env-serving/` | Root-local serving configuration: `env/mime` suffix/default Content-Type rules and `env/index` candidate ordering. |
+| `env-listing-off/` | `env/listing off` behavior: index-less directories return 404 while matching index files still serve. |
+| `env-mime-bad/` | Malformed `env/mime` produces a 500 for literal-file responses resolved through it. |
 | `precedence/` | The §6.2 ladder. Contains a real file `wc` at root, a real file `bin/wc`, a real `grep/docs/file.txt`, and commands `wc`/`grep` on PATH. Proves exact-path-wins, `/bin/wc` serves file, `/grep/docs/file.txt` serves file. |
 | `commands-mf/` | Metadata-free commands only (arity 0). `cat`-style pass-through, identity, line-count. Proves implied cat, multi-stage pipelines, and that path args → 400 (§13.1, §13.2 of pipeline). |
 | `commands-arity/` | Commands with `arity 1`, `arity 2` (diff-like), `arity *`. Proves path-arg consumption, multi-resource via root-relative argv (§10.5), arity-star argv, and that a **path-arity** argument is percent-decoded and passed verbatim even when it contains a decoded `/` — `/echo1/a%2Fb/file.txt` with `echo1` arity 1 passes the single argv `a/b` (§5.1, Q21), distinct from the query-value encoding cases in `commands-query/`. |
@@ -631,8 +616,8 @@ canonical interpreter is POSIX `sh`:
 - This `sh` form is the one `validate-roots` validates by default and the one a
   reader sees in the repository.
 
-An implementation that declares `sh` in its `interpreters` manifest gets this tree
-copied verbatim at materialization. An implementation that does **not** declare
+An adapter that declares `sh` in its TOML `interpreters` list gets this tree
+copied verbatim at materialization. An adapter that does **not** declare
 `sh` but **does** declare another interpreter the corpus supports (e.g. `python3`)
 triggers an **interpreter-substitution pass** during materialization:
 
@@ -645,7 +630,7 @@ Substitution is purely mechanical because `_lib/` guarantees a byte-compatible
 variant per interpreter and the served command name carries no extension, so the
 `exec` rewrite only changes the interpreter token. A root is materializable for an
 implementation iff every command it serves has a `_lib/` variant for at least one
-interpreter the manifest declares; otherwise the root's optional/capability-gated
+interpreter the adapter declares; otherwise the root's optional/capability-gated
 vectors are `SKIP` and its selected MUST vectors are `UNTESTED`, all with
 recorded reasons (§7.3). `validate-roots --interpreter python3` validates the
 substituted form so the substitution pass itself is covered, not just the
@@ -660,7 +645,7 @@ other roots. Malformed-rule fixtures are invalid regardless of interpreter token
 Unresolved-interpreter fixtures use a reserved sentinel interpreter name such as
 `__wash_missing_interpreter__`; the materializer never substitutes that sentinel
 and `validate-roots` asserts it is not listed in the implementation's
-`interpreters`. A selected MUST vector in `exec-rules/` is therefore `UNTESTED`
+adapter `interpreters`. A selected MUST vector in `exec-rules/` is therefore `UNTESTED`
 only when the implementation declares no interpreter for which the corpus has
 fixture variants, not merely because it does not support POSIX `sh`.
 
@@ -696,14 +681,10 @@ fixture variants, not merely because it does not support POSIX `sh`.
   diffing snapshots the **whole bundle** (`‹tmp›/`), not just the served root, so a
   command that writes into the sibling `../shared/bin` is still detected rather
   than silently missed.
-- Some fixtures are **parameterized per implementation** at materialization time.
-  The `directories/` default-file fixture is created using the first entry of the
-  manifest's `default_index_files` (so an implementation whose default file is not
-  `index.html` is still tested against its own declared default), and is skipped
-  entirely when that capability is absent. The materializer writes a fixed,
-  byte-stable marker as the file's content (`wash-fixture: default-index\n`) so the
-  serving vector can assert it with `body_exact` regardless of which filename the
-  implementation declared.
+- Some fixtures are **synthesized at materialization time** for host-dependent
+  behavior, such as symlinks and case-colliding names. Root-local serving
+  configuration is checked in as ordinary corpus data under `env/`, not generated
+  from implementation declarations.
 - Symlink fixtures for `symlinks/` are **not** checked in as real symlinks; they
   are synthesized into the materialized tree at run time and only when the
   platform supports symlink creation and the manifest declares a `symlink_policy`.
@@ -908,8 +889,8 @@ common implementation bug is the *wrong* error class:
 ### 7.3 Capability-conditional vectors
 
 Capability gates are structured predicates, not free-form strings. A vector may
-carry `requires_capability` as either a shorthand boolean path
-(`directory_listing`) or an object predicate:
+carry `requires_capability` as either a shorthand boolean path (for boolean
+manifest fields such as `writes_enabled`) or an object predicate:
 
 ```yaml
 requires_capability:
@@ -918,10 +899,9 @@ requires_capability:
 ```
 
 Supported predicate operators are `equals`, `not_equals`, `present`, `absent`,
-`nonempty`, `contains`, and `matches_key` (for maps such as `mime.map`). Paths use
+`nonempty`, `contains`, and `matches_key` (for any remaining manifest maps). Paths use
 dot notation over the capability manifest. `all` and `any` compose predicates for
-multi-condition cases, such as "MIME inference is by extension and `.json` is in
-the declared map". `forbidden_when` uses the same predicate vocabulary for inverse
+multi-condition cases. `forbidden_when` uses the same predicate vocabulary for inverse
 assertions, for example asserting that a response header is absent under a given
 declared capability state.
 
@@ -938,7 +918,7 @@ and §3 forbids the adapter from pre-toggling defaults).
 A vector (or its root) may carry `requires_interpreter: python3` (etc.). Because
 `roots/_lib/` ships both `.sh` and `.py` variants of every fixture command, the
 materializer's interpreter-substitution pass (§6.3) can bind a root to whichever
-interpreter the implementation declares. A vector pins a specific interpreter via
+interpreter the adapter declares. A vector pins a specific interpreter via
 `requires_interpreter` only when the behavior under test is interpreter-specific
 (in which case substitution to another interpreter is not attempted). If an
 optional or implementation-defined vector cannot run under the declared

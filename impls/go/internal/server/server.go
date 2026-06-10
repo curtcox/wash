@@ -16,8 +16,6 @@ import (
 
 const maxErrorBody = 8192
 
-var defaultIndexFiles = []string{"index.html"}
-
 // ServerConfig holds server-level state loaded at startup.
 type ServerConfig struct {
 	Root        string
@@ -129,21 +127,44 @@ func (s *Server) handleFilesystemGet(w http.ResponseWriter, r *http.Request, res
 			s.sendError(w, r, http.StatusInternalServerError, fmt.Sprintf("read failed: %v", err), nil)
 			return
 		}
-		ct := filesystem.InferMIMEType(res.Path)
+		ct, err := s.fs.InferMIMEType(res.Path)
+		if err != nil {
+			s.sendError(w, r, http.StatusInternalServerError, err.Error(), nil)
+			return
+		}
 		s.sendResponse(w, r, http.StatusOK, data, ct, nil, omitBody)
 		return
 	}
 
-	// Directory: check for index file first (RT-6.5-dir-index)
-	idx := s.fs.FindIndexFile(res.Path, defaultIndexFiles)
+	// Directory: check for index file first (RT-6.5-dir-index, RT-7.5-env-index)
+	indexNames, err := s.fs.LoadIndexNames()
+	if err != nil {
+		s.sendError(w, r, http.StatusInternalServerError, err.Error(), nil)
+		return
+	}
+	idx := s.fs.FindIndexFile(res.Path, indexNames)
 	if idx != "" {
 		data, err := s.fs.ReadFile(idx)
 		if err != nil {
 			s.sendError(w, r, http.StatusInternalServerError, fmt.Sprintf("read index failed: %v", err), nil)
 			return
 		}
-		ct := filesystem.InferMIMEType(idx)
+		ct, err := s.fs.InferMIMEType(idx)
+		if err != nil {
+			s.sendError(w, r, http.StatusInternalServerError, err.Error(), nil)
+			return
+		}
 		s.sendResponse(w, r, http.StatusOK, data, ct, nil, omitBody)
+		return
+	}
+
+	enabled, err := s.fs.ListingEnabled()
+	if err != nil {
+		s.sendError(w, r, http.StatusInternalServerError, err.Error(), nil)
+		return
+	}
+	if !enabled {
+		s.sendError(w, r, http.StatusNotFound, "not found", nil)
 		return
 	}
 

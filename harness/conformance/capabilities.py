@@ -63,10 +63,6 @@ def validate_manifest(data: dict[str, Any], *, path: Path | None = None) -> list
     origin_errors = _validate_origin_form(data.get("origin_form", ""))
     errors.extend(origin_errors)
 
-    for name in data.get("default_index_files", []):
-        if not _is_safe_filename(name):
-            errors.append(f"unsafe default_index_files entry: {name!r}")
-
     for rel in data.get("runtime_artifact_paths", []):
         if not _is_root_relative_path(rel):
             errors.append(f"unsafe runtime_artifact_paths entry: {rel!r}")
@@ -89,16 +85,6 @@ def _validate_origin_form(origin_form: str) -> list[str]:
     if not host or host not in LOOPBACK_HOSTS:
         errors.append(f"origin_form host must be a loopback literal/name, got {host!r}")
     return errors
-
-
-def _is_safe_filename(name: str) -> bool:
-    if not name or name in {".", ".."}:
-        return False
-    if "/" in name or "\\" in name:
-        return False
-    if any(ord(c) < 32 or ord(c) == 127 for c in name):
-        return False
-    return True
 
 
 def _is_root_relative_path(path: str) -> bool:

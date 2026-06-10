@@ -38,6 +38,7 @@ class AdapterManifest:
     cwd: str | None = None
     env: dict[str, str] = field(default_factory=dict)
     capabilities: str = ""
+    interpreters: list[str] = field(default_factory=lambda: ["sh"])
     bind_failure_pattern: str = ""
     path: Path | None = None
 
@@ -66,6 +67,7 @@ def load_adapter(path: str | Path) -> AdapterManifest:
         cwd=data.get("cwd"),
         env={str(k): str(v) for k, v in data.get("env", {}).items()},
         capabilities=data.get("capabilities", ""),
+        interpreters=[str(i) for i in data.get("interpreters", ["sh"])],
         bind_failure_pattern=data.get("bind_failure_pattern", ""),
         path=path,
     )

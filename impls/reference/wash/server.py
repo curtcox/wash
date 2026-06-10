@@ -18,6 +18,7 @@ from wash.executor import (
     load_exec_rules,
 )
 from wash.filesystem import (
+    EnvConfigError,
     RootEscapeError,
     SymlinkEscapeError,
     delete_file,
@@ -25,7 +26,9 @@ from wash.filesystem import (
     find_index_file,
     infer_mime,
     infer_mime_from_bytes,
+    listing_enabled,
     literal_path_parts_from_raw,
+    load_index_names,
     put_file,
     read_file_bytes,
     split_raw_target,
@@ -43,7 +46,6 @@ from wash.parser import (
 )
 
 MAX_ERROR_BODY = 8192
-DEFAULT_INDEX_FILES = ["index.html"]
 BIND_HOST = "127.0.0.1"
 
 
@@ -155,27 +157,36 @@ class WashRequestHandler(BaseHTTPRequestHandler):
         return headers
 
     def _handle_filesystem_get(self, resource: FilesystemParse) -> None:
+        root = self.server.config.root
         path = resource.resource.path
         omit_body = self.command == "HEAD"
-        if resource.resource.kind == "file":
-            data = read_file_bytes(path)
-            self._send_response(
-                200,
-                data,
-                content_type=infer_mime(path),
-                omit_body=omit_body,
-            )
-            return
+        try:
+            if resource.resource.kind == "file":
+                data = read_file_bytes(path)
+                self._send_response(
+                    200,
+                    data,
+                    content_type=infer_mime(path, root),
+                    omit_body=omit_body,
+                )
+                return
 
-        index = find_index_file(path, DEFAULT_INDEX_FILES)
-        if index is not None:
-            data = read_file_bytes(index)
-            self._send_response(
-                200,
-                data,
-                content_type=infer_mime(index),
-                omit_body=omit_body,
-            )
+            index = find_index_file(path, load_index_names(root))
+            if index is not None:
+                data = read_file_bytes(index)
+                self._send_response(
+                    200,
+                    data,
+                    content_type=infer_mime(index, root),
+                    omit_body=omit_body,
+                )
+                return
+
+            if not listing_enabled(root):
+                self._send_error(404, "not found")
+                return
+        except EnvConfigError as exc:
+            self._send_error(500, str(exc))
             return
 
         listing = directory_listing(path)

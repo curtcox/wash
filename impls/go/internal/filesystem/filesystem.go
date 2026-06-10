@@ -9,13 +9,123 @@ import (
 	"strings"
 )
 
-// MIME type mappings per capabilities spec.
-var mimeMap = map[string]string{
+// Built-in fallback MIME table per runtime.md §7.4.
+var fallbackMIMETable = map[string]string{
+	".html": "text/html",
+	".htm":  "text/html",
 	".txt":  "text/plain",
+	".md":   "text/markdown",
 	".json": "application/json",
+	".css":  "text/css",
+	".js":   "text/javascript",
+	".mjs":  "text/javascript",
+	".svg":  "image/svg+xml",
+	".xml":  "application/xml",
+	".png":  "image/png",
+	".jpg":  "image/jpeg",
+	".jpeg": "image/jpeg",
+	".gif":  "image/gif",
+	".webp": "image/webp",
+	".ico":  "image/x-icon",
+	".pdf":  "application/pdf",
+	".wasm": "application/wasm",
 }
 
 const mimeDefault = "application/octet-stream"
+
+// DefaultIndexNames applies when root/env/index is absent (runtime.md §7.5).
+var DefaultIndexNames = []string{"index.html"}
+
+// EnvConfigError is returned for a malformed root/env serving-config file.
+type EnvConfigError struct{ msg string }
+
+func (e *EnvConfigError) Error() string { return e.msg }
+
+func envConfigLines(path string) ([]string, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	var lines []string
+	for _, raw := range strings.Split(string(data), "\n") {
+		stripped := strings.TrimSpace(raw)
+		if stripped == "" || strings.HasPrefix(stripped, "#") {
+			continue
+		}
+		lines = append(lines, stripped)
+	}
+	return lines, nil
+}
+
+// LoadMIMEConfig parses root/env/mime per runtime.md §7.4.
+// Returns (suffix map, declared default or "").
+func (fs *FS) LoadMIMEConfig() (map[string]string, string, error) {
+	mimeFile := filepath.Join(fs.root, "env", "mime")
+	mapping := map[string]string{}
+	if _, err := os.Stat(mimeFile); err != nil {
+		return mapping, "", nil
+	}
+	lines, err := envConfigLines(mimeFile)
+	if err != nil {
+		return nil, "", err
+	}
+	declaredDefault := ""
+	for _, line := range lines {
+		tokens := strings.Fields(line)
+		if len(tokens) != 2 {
+			return nil, "", &EnvConfigError{fmt.Sprintf("malformed env/mime line: %q", line)}
+		}
+		key, mediaType := tokens[0], tokens[1]
+		if !strings.Contains(mediaType, "/") {
+			return nil, "", &EnvConfigError{fmt.Sprintf("malformed env/mime media type: %q", mediaType)}
+		}
+		switch {
+		case key == "default":
+			declaredDefault = mediaType
+		case strings.HasPrefix(key, ".") && len(key) > 1:
+			mapping[strings.ToLower(key)] = mediaType
+		default:
+			return nil, "", &EnvConfigError{fmt.Sprintf("malformed env/mime suffix: %q", key)}
+		}
+	}
+	return mapping, declaredDefault, nil
+}
+
+// LoadIndexNames parses root/env/index per runtime.md §7.5.
+func (fs *FS) LoadIndexNames() ([]string, error) {
+	indexFile := filepath.Join(fs.root, "env", "index")
+	if _, err := os.Stat(indexFile); err != nil {
+		return append([]string{}, DefaultIndexNames...), nil
+	}
+	lines, err := envConfigLines(indexFile)
+	if err != nil {
+		return nil, err
+	}
+	names := []string{}
+	for _, line := range lines {
+		if strings.ContainsAny(line, "/\\\x00") || line == "." || line == ".." {
+			return nil, &EnvConfigError{fmt.Sprintf("malformed env/index entry: %q", line)}
+		}
+		names = append(names, line)
+	}
+	return names, nil
+}
+
+// ListingEnabled parses root/env/listing per runtime.md §7.6; absent -> enabled.
+func (fs *FS) ListingEnabled() (bool, error) {
+	listingFile := filepath.Join(fs.root, "env", "listing")
+	if _, err := os.Stat(listingFile); err != nil {
+		return true, nil
+	}
+	lines, err := envConfigLines(listingFile)
+	if err != nil {
+		return false, err
+	}
+	if len(lines) != 1 || (lines[0] != "on" && lines[0] != "off") {
+		return false, &EnvConfigError{"malformed env/listing: expected single on/off token"}
+	}
+	return lines[0] == "on", nil
+}
 
 // NotFoundError is returned when a path does not exist.
 type NotFoundError struct{ msg string }
@@ -397,13 +507,23 @@ func (fs *FS) DeleteFile(relParts []string, symlinkPolicy string) error {
 	return os.Remove(resolved)
 }
 
-// InferMIMEType determines the MIME type from file extension.
-func InferMIMEType(absPath string) string {
+// InferMIMEType resolves Content-Type per runtime.md §6.1 resolution order.
+func (fs *FS) InferMIMEType(absPath string) (string, error) {
 	ext := strings.ToLower(filepath.Ext(absPath))
-	if m, ok := mimeMap[ext]; ok {
-		return m
+	mapping, declaredDefault, err := fs.LoadMIMEConfig()
+	if err != nil {
+		return "", err
 	}
-	return mimeDefault
+	if m, ok := mapping[ext]; ok {
+		return m, nil
+	}
+	if declaredDefault != "" {
+		return declaredDefault, nil
+	}
+	if m, ok := fallbackMIMETable[ext]; ok {
+		return m, nil
+	}
+	return mimeDefault, nil
 }
 
 // InferMIMEFromBytes returns a MIME type from declared type or content sniff.

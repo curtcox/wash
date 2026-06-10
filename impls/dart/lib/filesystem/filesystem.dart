@@ -32,11 +32,109 @@ class FilesystemResource {
   FilesystemResource(this.kind, this.path, this.relPath);
 }
 
-const Map<String, String> mimeMap = {
+const Map<String, String> fallbackMimeTable = {
+  '.html': 'text/html',
+  '.htm': 'text/html',
   '.txt': 'text/plain',
+  '.md': 'text/markdown',
   '.json': 'application/json',
+  '.css': 'text/css',
+  '.js': 'text/javascript',
+  '.mjs': 'text/javascript',
+  '.svg': 'image/svg+xml',
+  '.xml': 'application/xml',
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.gif': 'image/gif',
+  '.webp': 'image/webp',
+  '.ico': 'image/x-icon',
+  '.pdf': 'application/pdf',
+  '.wasm': 'application/wasm',
 };
 const String mimeDefault = 'application/octet-stream';
+const List<String> defaultIndexNames = ['index.html'];
+
+class EnvConfigError implements Exception {
+  final String message;
+  EnvConfigError(this.message);
+  @override
+  String toString() => 'EnvConfigError: $message';
+}
+
+class MimeConfig {
+  final Map<String, String> mapping;
+  final String? defaultType;
+
+  MimeConfig(this.mapping, this.defaultType);
+}
+
+List<String> _envConfigLines(String path) {
+  final file = File(path);
+  if (!file.existsSync()) return <String>[];
+  final lines = <String>[];
+  for (final raw in file.readAsLinesSync()) {
+    final stripped = raw.trim();
+    if (stripped.isEmpty || stripped.startsWith('#')) continue;
+    lines.add(stripped);
+  }
+  return lines;
+}
+
+MimeConfig loadMimeConfig(String root) {
+  final path = '$root${Platform.pathSeparator}env${Platform.pathSeparator}mime';
+  if (!File(path).existsSync()) return MimeConfig(<String, String>{}, null);
+  final mapping = <String, String>{};
+  String? defaultType;
+  for (final line in _envConfigLines(path)) {
+    final tokens = line.split(RegExp(r'\s+'));
+    if (tokens.length != 2) {
+      throw EnvConfigError('malformed env/mime line: $line');
+    }
+    final key = tokens[0];
+    final mediaType = tokens[1];
+    if (!mediaType.contains('/')) {
+      throw EnvConfigError('malformed env/mime media type: $mediaType');
+    }
+    if (key == 'default') {
+      defaultType = mediaType;
+    } else if (key.startsWith('.') && key.length > 1) {
+      mapping[key.toLowerCase()] = mediaType;
+    } else {
+      throw EnvConfigError('malformed env/mime suffix: $key');
+    }
+  }
+  return MimeConfig(mapping, defaultType);
+}
+
+List<String> loadIndexNames(String root) {
+  final path =
+      '$root${Platform.pathSeparator}env${Platform.pathSeparator}index';
+  if (!File(path).existsSync()) return List<String>.from(defaultIndexNames);
+  final names = <String>[];
+  for (final line in _envConfigLines(path)) {
+    if (line.contains('/') ||
+        line.contains('\\') ||
+        line.contains('\x00') ||
+        line == '.' ||
+        line == '..') {
+      throw EnvConfigError('malformed env/index entry: $line');
+    }
+    names.add(line);
+  }
+  return names;
+}
+
+bool listingEnabled(String root) {
+  final path =
+      '$root${Platform.pathSeparator}env${Platform.pathSeparator}listing';
+  if (!File(path).existsSync()) return true;
+  final lines = _envConfigLines(path);
+  if (lines.length != 1 || (lines[0] != 'on' && lines[0] != 'off')) {
+    throw EnvConfigError('malformed env/listing: expected single on/off token');
+  }
+  return lines[0] == 'on';
+}
 
 List<String> splitRawTarget(String rawTarget) {
   if (!rawTarget.startsWith('/')) {
@@ -88,7 +186,11 @@ bool _isUnderRoot(String rootResolved, String pathResolved) {
       pathResolved.startsWith(rootResolved + sep);
 }
 
-String? _lookupChild(String directory, String name, {required bool caseSensitive}) {
+String? _lookupChild(
+  String directory,
+  String name, {
+  required bool caseSensitive,
+}) {
   final direct = '$directory${Platform.pathSeparator}$name';
   if (File(direct).existsSync() ||
       Link(direct).existsSync() ||
@@ -212,7 +314,9 @@ FilesystemResource? tryExactFilesystem(
   final rootResolved = _resolveReal(root);
   String rel;
   try {
-    rel = resolved.replaceFirst(rootResolved, '').replaceFirst(RegExp(r'^[/\\]'), '');
+    rel = resolved
+        .replaceFirst(rootResolved, '')
+        .replaceFirst(RegExp(r'^[/\\]'), '');
     rel = rel.replaceAll('\\', '/');
   } catch (_) {
     rel = '';
@@ -228,11 +332,16 @@ FilesystemResource? tryExactFilesystem(
   return null;
 }
 
-String inferMime(String path) {
+String inferMime(String path, {String? root}) {
   final dotIdx = path.lastIndexOf('.');
-  if (dotIdx < 0) return mimeDefault;
-  final ext = path.substring(dotIdx).toLowerCase();
-  return mimeMap[ext] ?? mimeDefault;
+  final ext = dotIdx < 0 ? '' : path.substring(dotIdx).toLowerCase();
+  if (root != null) {
+    final config = loadMimeConfig(root);
+    final mapped = config.mapping[ext];
+    if (mapped != null) return mapped;
+    if (config.defaultType != null) return config.defaultType!;
+  }
+  return fallbackMimeTable[ext] ?? mimeDefault;
 }
 
 String inferMimeFromBytes(List<int> data, String? declared) {
@@ -295,7 +404,8 @@ String putFile(
     final link = Link(current);
     if (link.existsSync()) {
       final resolved = link.resolveSymbolicLinksSync();
-      if (symlinkPolicy == 'reject-escaping' && !_isUnderRoot(rootResolved, resolved)) {
+      if (symlinkPolicy == 'reject-escaping' &&
+          !_isUnderRoot(rootResolved, resolved)) {
         throw SymlinkEscapeError('symlink escapes root');
       }
     }
@@ -308,7 +418,8 @@ String putFile(
   final targetLink = Link(target);
   if (targetLink.existsSync()) {
     final resolved = targetLink.resolveSymbolicLinksSync();
-    if (symlinkPolicy == 'reject-escaping' && !_isUnderRoot(rootResolved, resolved)) {
+    if (symlinkPolicy == 'reject-escaping' &&
+        !_isUnderRoot(rootResolved, resolved)) {
       throw SymlinkEscapeError('symlink escapes root');
     }
   }

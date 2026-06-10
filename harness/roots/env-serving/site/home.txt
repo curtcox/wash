@@ -1,0 +1,1 @@
+wash-fixture: env-index home

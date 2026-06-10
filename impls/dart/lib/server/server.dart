@@ -11,7 +11,6 @@ import '../parser/parser.dart';
 const String _rawTargetHeader = 'x-wash-raw-target';
 
 const int maxErrorBody = 8192;
-const List<String> defaultIndexFiles = ['index.html'];
 
 class ServerConfig {
   final String root;
@@ -44,10 +43,12 @@ class WashServer {
   WashServer._(this._server, this._rawSocket, this._config);
 
   static Future<WashServer> bind(
-      String host, int port, ServerConfig config) async {
+    String host,
+    int port,
+    ServerConfig config,
+  ) async {
     final rawSocket = await RawServerSocket.bind(host, port);
-    final server = await HttpServer.listenOn(
-        _PatchedServerSocket(rawSocket));
+    final server = await HttpServer.listenOn(_PatchedServerSocket(rawSocket));
     return WashServer._(server, rawSocket, config);
   }
 
@@ -99,7 +100,8 @@ class WashServer {
     final parts = accept.split(',');
     if (parts.isEmpty) return false;
     final first = parts[0].trim().toLowerCase();
-    return accept.contains('application/json') && !first.startsWith('text/plain');
+    return accept.contains('application/json') &&
+        !first.startsWith('text/plain');
   }
 
   List<int> _errorBody(
@@ -213,28 +215,38 @@ class WashServer {
     FilesystemResource resource,
   ) async {
     final omitBody = request.method == 'HEAD';
-    if (resource.kind == ResourceKind.file) {
-      final data = readFileBytes(resource.path);
-      await _sendResponse(
-        request.response,
-        200,
-        data,
-        contentType: inferMime(resource.path),
-        omitBody: omitBody,
-      );
-      return;
-    }
+    try {
+      if (resource.kind == ResourceKind.file) {
+        final data = readFileBytes(resource.path);
+        await _sendResponse(
+          request.response,
+          200,
+          data,
+          contentType: inferMime(resource.path, root: _config.root),
+          omitBody: omitBody,
+        );
+        return;
+      }
 
-    final index = findIndexFile(resource.path, defaultIndexFiles);
-    if (index != null) {
-      final data = readFileBytes(index);
-      await _sendResponse(
-        request.response,
-        200,
-        data,
-        contentType: inferMime(index),
-        omitBody: omitBody,
-      );
+      final index = findIndexFile(resource.path, loadIndexNames(_config.root));
+      if (index != null) {
+        final data = readFileBytes(index);
+        await _sendResponse(
+          request.response,
+          200,
+          data,
+          contentType: inferMime(index, root: _config.root),
+          omitBody: omitBody,
+        );
+        return;
+      }
+
+      if (!listingEnabled(_config.root)) {
+        await _sendErrorReq(request, 404, 'not found');
+        return;
+      }
+    } on EnvConfigError catch (e) {
+      await _sendErrorReq(request, 500, e.message);
       return;
     }
 
@@ -286,7 +298,11 @@ class WashServer {
         return;
       }
       await _sendResponse(
-          request.response, 200, [], contentType: 'text/plain; charset=utf-8');
+        request.response,
+        200,
+        [],
+        contentType: 'text/plain; charset=utf-8',
+      );
       return;
     }
 
@@ -312,7 +328,11 @@ class WashServer {
         return;
       }
       await _sendResponse(
-          request.response, 200, [], contentType: 'text/plain; charset=utf-8');
+        request.response,
+        200,
+        [],
+        contentType: 'text/plain; charset=utf-8',
+      );
       return;
     }
   }
@@ -389,23 +409,33 @@ class WashServer {
 
     if (result.httpStatus >= 400) {
       final fail = result.failingStage;
-      final extra = <String, dynamic>{
-        'pipeline': result.pipelineDescription,
-      };
+      final extra = <String, dynamic>{'pipeline': result.pipelineDescription};
       if (fail != null) {
         extra['command'] = fail.name;
         extra['exit_status'] = fail.exitCode;
         if (fail.stdout.isNotEmpty) {
-          extra['stdout'] = utf8.decode(fail.stdout, allowMalformed: true)
-              .substring(0, fail.stdout.length > 8192 ? 8192 : fail.stdout.length);
+          extra['stdout'] = utf8
+              .decode(fail.stdout, allowMalformed: true)
+              .substring(
+                0,
+                fail.stdout.length > 8192 ? 8192 : fail.stdout.length,
+              );
         }
         if (fail.stderr.isNotEmpty) {
-          extra['stderr'] = utf8.decode(fail.stderr, allowMalformed: true)
-              .substring(0, fail.stderr.length > 8192 ? 8192 : fail.stderr.length);
+          extra['stderr'] = utf8
+              .decode(fail.stderr, allowMalformed: true)
+              .substring(
+                0,
+                fail.stderr.length > 8192 ? 8192 : fail.stderr.length,
+              );
         }
       }
-      await _sendErrorReq(request, result.httpStatus, 'command failed',
-          extra: extra);
+      await _sendErrorReq(
+        request,
+        result.httpStatus,
+        'command failed',
+        extra: extra,
+      );
       return;
     }
 
@@ -424,8 +454,7 @@ class WashServer {
       }
     }
 
-    final contentType =
-        inferMimeFromBytes(result.stdout, result.contentType);
+    final contentType = inferMimeFromBytes(result.stdout, result.contentType);
     await _sendResponse(
       request.response,
       200,
@@ -479,7 +508,10 @@ class WashServer {
       }
       if (method == 'POST') {
         await _sendErrorReq(
-            request, 405, 'POST not permitted for plain file resource');
+          request,
+          405,
+          'POST not permitted for plain file resource',
+        );
         return;
       }
       await _sendErrorReq(request, 405, 'method $method not permitted');
@@ -494,8 +526,11 @@ class WashServer {
     if (method == 'POST' && parsed is ParseResultPipeline) {
       for (final stage in parsed.pipeline.stages) {
         if (!stage.metadata.methods.contains('POST')) {
-          await _sendErrorReq(request, 405,
-              'method POST not permitted by command ${stage.name}');
+          await _sendErrorReq(
+            request,
+            405,
+            'method POST not permitted by command ${stage.name}',
+          );
           return;
         }
       }
@@ -506,7 +541,10 @@ class WashServer {
 }
 
 Future<(WashServer, int)> createServer(
-    String root, String host, int port) async {
+  String root,
+  String host,
+  int port,
+) async {
   final config = ServerConfig.fromRoot(root);
   final server = await WashServer.bind(host, port, config);
   return (server, server.port);
@@ -516,8 +554,7 @@ Future<(WashServer, int)> createServer(
 // Raw-socket middleware: sniff request line, inject raw target as header
 // ---------------------------------------------------------------------------
 
-class _PatchedServerSocket extends Stream<Socket>
-    implements ServerSocket {
+class _PatchedServerSocket extends Stream<Socket> implements ServerSocket {
   final RawServerSocket _raw;
 
   _PatchedServerSocket(this._raw);
@@ -541,12 +578,14 @@ class _PatchedServerSocket extends Stream<Socket>
     void Function()? onDone,
     bool? cancelOnError,
   }) {
-    return _raw.map(_PatchedSocket.new).listen(
-      onData,
-      onError: onError,
-      onDone: onDone,
-      cancelOnError: cancelOnError,
-    );
+    return _raw
+        .map(_PatchedSocket.new)
+        .listen(
+          onData,
+          onError: onError,
+          onDone: onDone,
+          cancelOnError: cancelOnError,
+        );
   }
 }
 
@@ -567,11 +606,7 @@ class _PatchedSocket extends Stream<Uint8List> implements Socket {
 
   _PatchedSocket(this._raw) {
     _raw.readEventsEnabled = true;
-    _raw.listen(
-      _onRawEvent,
-      onError: _ctrl.addError,
-      onDone: _ctrl.close,
-    );
+    _raw.listen(_onRawEvent, onError: _ctrl.addError, onDone: _ctrl.close);
   }
 
   // ---- Stream<Uint8List> --------------------------------------------------
@@ -582,9 +617,12 @@ class _PatchedSocket extends Stream<Uint8List> implements Socket {
     Function? onError,
     void Function()? onDone,
     bool? cancelOnError,
-  }) =>
-      _ctrl.stream.listen(onData,
-          onError: onError, onDone: onDone, cancelOnError: cancelOnError);
+  }) => _ctrl.stream.listen(
+    onData,
+    onError: onError,
+    onDone: onDone,
+    cancelOnError: cancelOnError,
+  );
 
   // ---- IOSink (writes from server → client) --------------------------------
 
@@ -653,12 +691,10 @@ class _PatchedSocket extends Stream<Uint8List> implements Socket {
       _raw.setOption(option, enabled);
 
   @override
-  Uint8List getRawOption(RawSocketOption option) =>
-      _raw.getRawOption(option);
+  Uint8List getRawOption(RawSocketOption option) => _raw.getRawOption(option);
 
   @override
-  void setRawOption(RawSocketOption option) =>
-      _raw.setRawOption(option);
+  void setRawOption(RawSocketOption option) => _raw.setRawOption(option);
 
   @override
   void destroy() {
@@ -689,8 +725,7 @@ class _PatchedSocket extends Stream<Uint8List> implements Socket {
 
       // Re-emit bytes with the extra header injected after the request line.
       if (rawTarget != null) {
-        final injected =
-            '$_rawTargetHeader: $rawTarget\r\n'.codeUnits;
+        final injected = '$_rawTargetHeader: $rawTarget\r\n'.codeUnits;
         final before = bytes.sublist(0, crlfIdx + 2); // include \r\n
         final after = bytes.sublist(crlfIdx + 2);
         _ctrl.add(Uint8List.fromList([...before, ...injected, ...after]));

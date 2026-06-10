@@ -1,0 +1,2 @@
+# wash-fixture: malformed mime map (suffix missing leading dot)
+notasuffix text/plain

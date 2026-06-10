@@ -135,15 +135,12 @@ def render_compliance() -> str:
     names = list(impls)
     # Capability columns shared across all manifests, in a friendly order.
     cap_cols = [
-        ("directory_listing", "Directory listing"),
-        ("default_index_files", "Index files"),
         ("symlink_policy", "Symlink policy"),
         ("case_sensitive_lookup", "Case-sensitive"),
         ("writes_enabled", "Writes"),
         ("deletes_enabled", "Deletes"),
         ("put_creates_parents", "PUT creates parents"),
         ("execution_metadata_headers", "Exec metadata hdrs"),
-        ("interpreters", "Interpreters"),
     ]
     head = (
         "<tr><th>Implementation</th><th>MUST</th><th>SHOULD</th><th>optional</th>"

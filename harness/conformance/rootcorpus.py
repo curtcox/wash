@@ -171,6 +171,7 @@ def materialize(
     *,
     caps: dict[str, Any] | None = None,
     interpreter: str | None = None,
+    interpreters: list[str] | None = None,
     synthesize_symlinks: bool = True,
     synthesize_case: bool = True,
 ) -> MaterializedRoot:
@@ -197,12 +198,9 @@ def materialize(
         material_path = tmp
         _copy_tree(src, material_path)
 
-    chosen = _choose_interpreter(caps, interpreter)
+    chosen = _choose_interpreter(interpreters, interpreter)
     if chosen and chosen != "sh":
         _substitute_interpreter(material_path, chosen)
-
-    if caps:
-        _apply_per_impl_fixtures(material_path, caps, root_name)
 
     if synthesize_symlinks and caps and caps.get("symlink_policy") != "unsupported":
         if root_name == "symlinks":
@@ -234,13 +232,12 @@ def _copy_tree(src: Path, dst: Path) -> None:
 
 
 def _choose_interpreter(
-    caps: dict[str, Any] | None, override: str | None
+    interpreters: list[str] | None, override: str | None
 ) -> str | None:
     if override:
         return override
-    if not caps:
+    if interpreters is None:
         return "sh"
-    interpreters = caps.get("interpreters", ["sh"])
     if "sh" in interpreters:
         return "sh"
     for name in interpreters:
@@ -301,18 +298,6 @@ def _substitute_interpreter(root: Path, interpreter: str) -> None:
         )
 
 
-def _apply_per_impl_fixtures(root: Path, caps: dict[str, Any], root_name: str) -> None:
-    if root_name == "directories":
-        defaults = caps.get("default_index_files") or []
-        if defaults:
-            marker = "wash-fixture: default-index\n"
-            for d in root.iterdir():
-                if d.is_dir() and d.name == "with-index":
-                    target = d / defaults[0]
-                    target.parent.mkdir(parents=True, exist_ok=True)
-                    target.write_text(marker, encoding="utf-8")
-
-
 def _synthesize_symlinks(root: Path) -> None:
     target = root / "plain-target.txt"
     if not target.is_file():
@@ -356,7 +341,6 @@ def validate_roots(*, interpreter: str | None = None) -> list[str]:
                 mat = materialize(
                     root_name,
                     interpreter=interpreter,
-                    caps={"interpreters": [interpreter]},
                 )
                 errors.extend(
                     _validate_root_tree(mat.path, f"{root_name}@{interpreter}")
@@ -428,8 +412,9 @@ def _validate_lib_inventory() -> list[str]:
     return errors
 
 
-def can_materialize_for_caps(root_name: str, caps: dict[str, Any]) -> tuple[bool, str]:
-    interpreters = caps.get("interpreters", [])
+def can_materialize_for_interpreters(
+    root_name: str, interpreters: list[str]
+) -> tuple[bool, str]:
     if "sh" in interpreters:
         return True, "sh available"
     for name in interpreters:

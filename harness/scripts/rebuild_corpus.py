@@ -172,6 +172,7 @@ def rebuild_directories() -> None:
     setup_bin(root, "dirprobe", "grep", "wc")
     write(root / "env" / "meta" / "grep", "arity 1\n")
     write(root / "with-index" / ".keep", "")
+    write(root / "with-index" / "index.html", "wash-fixture: default-index\n")
     write(root / "no-index" / ".keep", "")
     write(root / "docs" / "readme.txt", "wash-fixture: docs readme\n")
 
@@ -287,10 +288,45 @@ def rebuild_plain_files() -> None:
         shutil.rmtree(root)
     write(root / "arbitrary.txt", "arbitrary plain file content")
     write(root / "data.json", '{"sample":true,"name":"data"}')
+    write(root / "page.html", "<html>wash-sample</html>\n")
     write(root / "nested" / "path" / "file.txt", "nested path file content")
     write(root / "literal?q.txt", "literal question filename\n")
     write(root / ".dotfile", "dot\n")
     write(root / ".segment" / "normal.txt", "segment\n")
+
+
+def rebuild_env_serving() -> None:
+    root = ROOTS / "env-serving"
+    if root.exists():
+        shutil.rmtree(root)
+    write(
+        root / "env" / "mime",
+        "# wash-fixture: per-root mime map\n"
+        ".dat application/x-wash\n"
+        "default text/x-fallback\n",
+    )
+    write(root / "env" / "index", "# wash-fixture: custom index candidates\nhome.txt\n")
+    write(root / "data.dat", "dat-bytes\n")
+    write(root / "mystery.bin", "bin-bytes\n")
+    write(root / "site" / "home.txt", "wash-fixture: env-index home\n")
+    write(root / "site" / "index.html", "wash-fixture: should-not-serve\n")
+
+    listing = ROOTS / "env-listing-off"
+    if listing.exists():
+        shutil.rmtree(listing)
+    write(listing / "env" / "listing", "# wash-fixture: listings disabled\noff\n")
+    write(listing / "bare" / ".keep", "")
+    write(listing / "with-index" / "index.html", "wash-fixture: listing-off index\n")
+
+    bad = ROOTS / "env-mime-bad"
+    if bad.exists():
+        shutil.rmtree(bad)
+    write(
+        bad / "env" / "mime",
+        "# wash-fixture: malformed mime map (suffix missing leading dot)\n"
+        "notasuffix text/plain\n",
+    )
+    write(bad / "a.txt", "x\n")
 
 
 def rebuild_path_outside() -> None:
@@ -325,6 +361,7 @@ def main() -> None:
     rebuild_mutation()
     rebuild_encoding()
     rebuild_plain_files()
+    rebuild_env_serving()
     rebuild_path_outside()
     print("Corpus rebuilt.")
 

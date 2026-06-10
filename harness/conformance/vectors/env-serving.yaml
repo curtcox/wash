@@ -1,0 +1,71 @@
+- id: env-mime-suffix
+  clauses: [RT-7.4-env-mime]
+  tier: MUST
+  root: env-serving
+  request: { method: GET, target: "/data.dat" }
+  expect:
+    status: 200
+    body_exact: "dat-bytes\n"
+    content_type: application/x-wash
+    no_mutation: true
+
+- id: env-mime-default
+  clauses: [RT-7.4-env-mime]
+  tier: MUST
+  root: env-serving
+  request: { method: GET, target: "/mystery.bin" }
+  expect:
+    status: 200
+    body_exact: "bin-bytes\n"
+    content_type: text/x-fallback
+    no_mutation: true
+
+- id: env-index-custom
+  clauses: [RT-7.5-env-index, RT-6.5-dir-index]
+  tier: MUST
+  root: env-serving
+  request: { method: GET, target: "/site" }
+  expect:
+    status: 200
+    body_exact: "wash-fixture: env-index home\n"
+    no_mutation: true
+
+- id: env-index-overrides-default-name
+  clauses: [RT-7.5-env-index]
+  tier: MUST
+  root: env-serving
+  request: { method: GET, target: "/site/" }
+  expect:
+    status: 200
+    body_exact: "wash-fixture: env-index home\n"
+    body_not_contains: "should-not-serve"
+    no_mutation: true
+
+- id: env-listing-off-bare-dir
+  clauses: [RT-7.6-env-listing]
+  tier: MUST
+  root: env-listing-off
+  request: { method: GET, target: "/bare" }
+  expect:
+    status: 404
+    no_mutation: true
+
+- id: env-listing-off-index-served
+  clauses: [RT-7.6-env-listing, RT-6.5-dir-index]
+  tier: MUST
+  root: env-listing-off
+  request: { method: GET, target: "/with-index" }
+  expect:
+    status: 200
+    body_exact: "wash-fixture: listing-off index\n"
+    content_type: text/html
+    no_mutation: true
+
+- id: env-mime-malformed-500
+  clauses: [RT-7.4-env-mime-malformed]
+  tier: MUST
+  root: env-mime-bad
+  request: { method: GET, target: "/a.txt" }
+  expect:
+    status: 500
+    no_mutation: true
