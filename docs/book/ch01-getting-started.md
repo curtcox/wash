@@ -200,7 +200,7 @@ You have now met everything `wash` is made of, and it comes to two kinds of file
 A file you **read**. Ask for its path and you get its bytes:
 
 ```
-GET /book/01/index.md        →   the chapter source
+GET /ch01.md                 →   the chapter source
 GET /notebook/0/0/a          →   "What is 2+2?"
 ```
 

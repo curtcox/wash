@@ -1,0 +1,146 @@
+#!/usr/bin/env python3
+"""check — crawl the book site and report any link that returns >= 400.
+
+The book is itself a wash app, so its links are ordinary URLs into the running
+runtime. This walks them the way a reader would: start at `/`, fetch each page,
+follow every same-origin href/src, and flag anything that fails. It catches both
+missing files (404) and bad parses (e.g. a metadata-free command handed too many
+path segments -> 400), which a plain "does the file exist?" check would miss.
+
+Usage:
+  ./check                 # spin up an ephemeral server on ./site and crawl it
+  ./check URL             # crawl an already-running server, e.g. http://localhost:8080/
+  ./check --verbose       # also list the links that passed
+
+Exit status is 0 if every link is < 400, else 1. No third-party dependencies.
+"""
+from __future__ import annotations
+
+import os
+import sys
+import threading
+from html.parser import HTMLParser
+from pathlib import Path
+from urllib.error import HTTPError, URLError
+from urllib.parse import urljoin, urlsplit
+from urllib.request import Request, urlopen
+
+HERE = Path(__file__).resolve().parent
+SITE = HERE / "site"
+REFERENCE = HERE / "impls" / "reference"
+
+
+class LinkExtractor(HTMLParser):
+    """Collect href/src targets from an HTML document."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.links: list[str] = []
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        d = dict(attrs)
+        for attr in ("href", "src"):
+            value = d.get(attr)
+            if value:
+                self.links.append(value)
+
+
+def fetch(url: str) -> tuple[int | None, str, bytes]:
+    """GET a URL. Returns (status, content_type, body); status None on error."""
+    try:
+        with urlopen(Request(url, method="GET"), timeout=5) as resp:
+            return resp.status, resp.headers.get_content_type(), resp.read()
+    except HTTPError as exc:
+        ctype = exc.headers.get_content_type() if exc.headers else ""
+        return exc.code, ctype, b""
+    except URLError:
+        return None, "", b""
+
+
+def crawl(base: str) -> tuple[dict[str, int | None], dict[str, str]]:
+    """BFS over same-origin links from base. Returns statuses and where-found."""
+    origin = urlsplit(base)[:2]  # (scheme, netloc)
+    status: dict[str, int | None] = {}
+    found_on: dict[str, str] = {}
+    queue: list[str] = [base]
+
+    while queue:
+        url = queue.pop(0)
+        if url in status:
+            continue
+        code, ctype, body = fetch(url)
+        status[url] = code
+        if code is None or code >= 400 or ctype != "text/html":
+            continue
+        extractor = LinkExtractor()
+        extractor.feed(body.decode("utf-8", "replace"))
+        for href in extractor.links:
+            target = urljoin(url, href).split("#", 1)[0]
+            parts = urlsplit(target)
+            if parts.scheme not in ("http", "https"):
+                continue  # mailto:, javascript:, etc.
+            if parts[:2] != origin:
+                continue  # external link: not ours to vet
+            found_on.setdefault(target, url)
+            if target not in status and target not in queue:
+                queue.append(target)
+
+    return status, found_on
+
+
+def start_server() -> tuple[object, str]:
+    sys.path.insert(0, str(REFERENCE))
+    from wash.server import create_server  # noqa: E402
+
+    httpd, port = create_server(SITE, "127.0.0.1", 0)
+    thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+    thread.start()
+    return httpd, f"http://127.0.0.1:{port}/"
+
+
+def main(argv: list[str]) -> int:
+    verbose = "--verbose" in argv or "-v" in argv
+    urls = [a for a in argv if not a.startswith("-")]
+
+    httpd = None
+    if urls:
+        base = urls[0]
+        if not base.endswith("/") and urlsplit(base).path == "":
+            base += "/"
+    else:
+        if not SITE.is_dir():
+            print(f"error: site root not found: {SITE}", file=sys.stderr)
+            return 1
+        httpd, base = start_server()
+
+    print(f"check: crawling {base}")
+    try:
+        status, found_on = crawl(base)
+    finally:
+        if httpd is not None:
+            httpd.shutdown()  # type: ignore[attr-defined]
+
+    broken = {u: c for u, c in status.items() if c is None or c >= 400}
+    ok = {u: c for u, c in status.items() if u not in broken}
+
+    if verbose:
+        for url in sorted(ok):
+            print(f"  ok   {ok[url]}  {url}")
+
+    if broken:
+        print("\nBROKEN:")
+        for url in sorted(broken):
+            code = broken[url]
+            label = "no response" if code is None else str(code)
+            src = found_on.get(url, "(start url)")
+            print(f"  {label:>11}  {url}\n               linked from {src}")
+
+    print(
+        f"\n{len(status)} link(s) checked, {len(broken)} broken"
+        + (" — all good" if not broken else "")
+    )
+    return 1 if broken else 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv[1:]))
