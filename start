@@ -1,0 +1,60 @@
+#!/bin/sh
+# start — launch the wash reference server on the book site and open a browser.
+#
+# Usage:  ./start            # serves ./site on http://localhost:8080/
+#         PORT=9000 ./start  # pick a different port
+#
+# Requires Python 3.11+. No install step: the reference runtime has no
+# dependencies, so we just put it on PYTHONPATH.
+set -eu
+
+here=$(cd "$(dirname "$0")" && pwd)
+root="$here/site"
+port="${PORT:-8080}"
+
+py=$(command -v python3 || command -v python || true)
+if [ -z "$py" ]; then
+  echo "error: python3 not found on PATH" >&2
+  exit 1
+fi
+
+export PYTHONPATH="$here/impls/reference${PYTHONPATH:+:$PYTHONPATH}"
+
+url="http://localhost:$port/"
+echo "wash: serving $root at $url"
+echo "wash: press Ctrl-C to stop"
+
+# Start the server in the background, then open the browser once it is up.
+"$py" -m wash.server --root "$root" --port "$port" &
+server_pid=$!
+trap 'kill "$server_pid" 2>/dev/null || true' INT TERM EXIT
+
+# Wait briefly for the port to accept connections.
+i=0
+while [ "$i" -lt 50 ]; do
+  if "$py" - "$port" <<'PYEOF' 2>/dev/null
+import socket, sys
+s = socket.socket()
+s.settimeout(0.2)
+try:
+    s.connect(("127.0.0.1", int(sys.argv[1])))
+    sys.exit(0)
+except OSError:
+    sys.exit(1)
+PYEOF
+  then
+    break
+  fi
+  i=$((i + 1))
+  sleep 0.1
+done
+
+if command -v open >/dev/null 2>&1; then
+  open "$url"
+elif command -v xdg-open >/dev/null 2>&1; then
+  xdg-open "$url" >/dev/null 2>&1 || true
+else
+  echo "wash: open $url in your browser"
+fi
+
+wait "$server_pid"
