@@ -1,0 +1,6 @@
+# Interpreter rules for the book app's commands.
+# The command files carry shebangs and the execute bit, so this is a safety net
+# for checkouts that drop the +x bit: run them through python3 regardless.
+ask     python3
+view    python3
+render  python3

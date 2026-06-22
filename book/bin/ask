@@ -1,0 +1,92 @@
+#!/usr/bin/env python3
+"""ask — a Tree-Producing Command.
+
+Reads a prompt on stdin (the POST body), appends a turn to the notebook tree
+under notebook/0, and prints the URL of a page that renders the result.
+
+A "turn" is two SDT nodes: the question, and its single child, the answer.
+
+    notebook/0/<n>/a       the question text
+    notebook/0/<n>/0/a     the answer text
+    notebook/0/<n>/0/b     node metadata (creation time)
+
+It emits a `Created Node <path>` manifest on stderr, per the TPC convention;
+the last manifest line names the redirect leaf. The runtime discards stderr
+from the response body, so the manifest is for tooling/diagnostics.
+
+"The LLM is not special": this answerer only does arithmetic and otherwise
+echoes. Swap this file for any command that reads input and writes output and
+the loop is unchanged.
+"""
+from __future__ import annotations
+
+import datetime
+import os
+import re
+import sys
+
+ORD = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+CONV = os.path.join("notebook", "0")  # cwd is the wash root
+
+
+def next_child(parent: str) -> str:
+    used = []
+    if os.path.isdir(parent):
+        for name in os.listdir(parent):
+            if len(name) == 1 and name in ORD and os.path.isdir(os.path.join(parent, name)):
+                used.append(ORD.index(name))
+    nxt = (max(used) + 1) if used else 0
+    if nxt >= len(ORD):
+        sys.stderr.write("notebook full (demo supports 36 turns)\n")
+        sys.exit(1)
+    return ORD[nxt]
+
+
+def answer_for(prompt: str) -> str:
+    # Only digits, operators, and spaces — safe to evaluate locally.
+    m = re.search(r"\d+(?:\s*[-+*/]\s*\d+)+", prompt)
+    if m:
+        try:
+            return str(eval(m.group(0)))  # noqa: S307 - whitelisted characters only
+        except Exception:
+            pass
+    return (
+        "I filed your message. This demo answerer only does arithmetic — "
+        "see Chapter 4 to wire in a command that actually thinks."
+    )
+
+
+def write(path: str, text: str) -> None:
+    with open(path, "w", encoding="utf-8") as fh:
+        fh.write(text)
+
+
+def main() -> int:
+    prompt = sys.stdin.buffer.read().decode("utf-8", "replace").strip()
+    if not prompt:
+        prompt = "(empty)"
+
+    os.makedirs(CONV, exist_ok=True)
+    n = next_child(CONV)
+
+    turn = os.path.join(CONV, n)
+    os.makedirs(turn, exist_ok=True)
+    write(os.path.join(turn, "a"), prompt + "\n")
+
+    ans = os.path.join(turn, "0")
+    os.makedirs(ans, exist_ok=True)
+    write(os.path.join(ans, "a"), answer_for(prompt) + "\n")
+    stamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    write(os.path.join(ans, "b"), f"created {stamp}\n")
+
+    sys.stderr.write(f"Created Node 0/{n}\n")
+    sys.stderr.write(f"Created Node 0/{n}/0\n")
+
+    # The page that renders this turn. The browser navigates here (client-side
+    # PRG): the reference runtime does not let commands emit redirects.
+    sys.stdout.write(f"/view/notebook/0/{n}/0")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

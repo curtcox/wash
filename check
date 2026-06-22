@@ -8,7 +8,7 @@ missing files (404) and bad parses (e.g. a metadata-free command handed too many
 path segments -> 400), which a plain "does the file exist?" check would miss.
 
 Usage:
-  ./check                 # spin up an ephemeral server on ./site and crawl it
+  ./check                 # spin up an ephemeral server on ./book and crawl it
   ./check URL             # crawl an already-running server, e.g. http://localhost:8080/
   ./check --verbose       # also list the links that passed
 
@@ -26,7 +26,7 @@ from urllib.parse import urljoin, urlsplit
 from urllib.request import Request, urlopen
 
 HERE = Path(__file__).resolve().parent
-SITE = HERE / "site"
+BOOK = HERE / "book"
 REFERENCE = HERE / "impls" / "reference"
 
 
@@ -92,7 +92,7 @@ def start_server() -> tuple[object, str]:
     sys.path.insert(0, str(REFERENCE))
     from wash.server import create_server  # noqa: E402
 
-    httpd, port = create_server(SITE, "127.0.0.1", 0)
+    httpd, port = create_server(BOOK, "127.0.0.1", 0)
     thread = threading.Thread(target=httpd.serve_forever, daemon=True)
     thread.start()
     return httpd, f"http://127.0.0.1:{port}/"
@@ -108,8 +108,8 @@ def main(argv: list[str]) -> int:
         if not base.endswith("/") and urlsplit(base).path == "":
             base += "/"
     else:
-        if not SITE.is_dir():
-            print(f"error: site root not found: {SITE}", file=sys.stderr)
+        if not BOOK.is_dir():
+            print(f"error: book app root not found: {BOOK}", file=sys.stderr)
             return 1
         httpd, base = start_server()
 

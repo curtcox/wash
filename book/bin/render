@@ -1,0 +1,131 @@
+#!/usr/bin/env python3
+"""render — a tiny, dependency-free Markdown-to-HTML filter.
+
+Reads Markdown on stdin (supplied by the implied cat of a `.md` file) and writes
+an HTML page on stdout. Declared `mime text/html` so the browser renders it.
+
+Deliberately small: headings, paragraphs, fenced code, blockquotes, lists,
+horizontal rules, and inline code / bold / links. Enough to read the book; not a
+conformant Markdown implementation.
+"""
+from __future__ import annotations
+
+import html
+import re
+import sys
+
+HEAD = """<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<title>wash</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+ body{font:16px/1.6 -apple-system,Segoe UI,Roboto,sans-serif;max-width:46rem;
+   margin:2rem auto;padding:0 1rem;color:#1a1a1a}
+ h1,h2,h3{line-height:1.25}
+ code{font:0.9em ui-monospace,Menlo,monospace;background:#f3f3f3;
+   padding:.1em .35em;border-radius:4px}
+ pre{background:#f6f8fa;padding:1rem;border-radius:8px;overflow:auto}
+ pre code{background:none;padding:0}
+ blockquote{margin:1rem 0;padding:.2rem 1rem;border-left:4px solid #d0d7de;
+   color:#444;background:#fafbfc}
+ a{color:#0a58ca}
+ hr{border:none;border-top:1px solid #e0e0e0;margin:2rem 0}
+ .nav{font:13px ui-monospace,Menlo,monospace;color:#888;margin-bottom:1.5rem}
+</style></head><body>
+<div class="nav"><a href="/">&larr; home</a></div>
+"""
+TAIL = "\n</body></html>\n"
+
+
+def inline(text: str) -> str:
+    text = html.escape(text)
+    text = re.sub(r"`([^`]+)`", r"<code>\1</code>", text)
+    text = re.sub(r"\*\*([^*]+)\*\*", r"<strong>\1</strong>", text)
+    text = re.sub(r"\[([^\]]+)\]\(([^)]+)\)", r'<a href="\2">\1</a>', text)
+    return text
+
+
+def render(md: str) -> str:
+    out: list[str] = []
+    lines = md.split("\n")
+    i = 0
+    in_code = False
+    para: list[str] = []
+    quote: list[str] = []
+    listing: list[str] = []
+
+    def flush_para() -> None:
+        if para:
+            out.append("<p>" + inline(" ".join(para)) + "</p>")
+            para.clear()
+
+    def flush_quote() -> None:
+        if quote:
+            out.append("<blockquote>" + inline(" ".join(quote)) + "</blockquote>")
+            quote.clear()
+
+    def flush_list() -> None:
+        if listing:
+            out.append("<ul>" + "".join(f"<li>{inline(x)}</li>" for x in listing) + "</ul>")
+            listing.clear()
+
+    def flush_all() -> None:
+        flush_para()
+        flush_quote()
+        flush_list()
+
+    while i < len(lines):
+        line = lines[i]
+        if line.startswith("```"):
+            flush_all()
+            if not in_code:
+                in_code = True
+                out.append("<pre><code>")
+            else:
+                in_code = False
+                out.append("</code></pre>")
+            i += 1
+            continue
+        if in_code:
+            out.append(html.escape(line))
+            i += 1
+            continue
+
+        stripped = line.strip()
+        if not stripped:
+            flush_all()
+        elif re.match(r"^#{1,6}\s", stripped):
+            flush_all()
+            level = len(stripped) - len(stripped.lstrip("#"))
+            out.append(f"<h{level}>{inline(stripped[level:].strip())}</h{level}>")
+        elif stripped in ("---", "***", "___"):
+            flush_all()
+            out.append("<hr>")
+        elif stripped.startswith(">"):
+            flush_para()
+            flush_list()
+            quote.append(stripped.lstrip("> ").rstrip())
+        elif re.match(r"^[-*]\s+", stripped):
+            flush_para()
+            flush_quote()
+            listing.append(re.sub(r"^[-*]\s+", "", stripped))
+        else:
+            flush_quote()
+            flush_list()
+            para.append(stripped)
+        i += 1
+
+    if in_code:
+        out.append("</code></pre>")
+    flush_all()
+    return "\n".join(out)
+
+
+def main() -> int:
+    md = sys.stdin.buffer.read().decode("utf-8", "replace")
+    sys.stdout.write(HEAD + render(md) + TAIL)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

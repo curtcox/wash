@@ -75,3 +75,8 @@ impls/dart/.packages
 
 # Generated developer site (built by docs/gen + .github/workflows/pages.yml)
 /site/
+
+# Book app: runtime-written notebook turns. The seed node (0/a) is tracked;
+# turns the reader creates at runtime are not.
+/book/notebook/0/*
+!/book/notebook/0/a

@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<title>The wash Programming Environment</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+ body{font:16px/1.6 -apple-system,Segoe UI,Roboto,sans-serif;max-width:46rem;
+   margin:2rem auto;padding:0 1rem;color:#1a1a1a}
+ h1{line-height:1.2}
+ code{font:0.9em ui-monospace,Menlo,monospace;background:#f3f3f3;
+   padding:.1em .35em;border-radius:4px}
+ a{color:#0a58ca}
+ textarea{width:100%;font:inherit;padding:.5rem;box-sizing:border-box}
+ button{font:inherit;padding:.4rem 1rem;margin-top:.4rem;cursor:pointer}
+ .box{margin:1.5rem 0;padding:1rem 1.2rem;border:1px solid #e0e0e0;border-radius:8px}
+ ul{padding-left:1.2rem}
+</style></head><body>
+
+<h1>The wash Programming Environment</h1>
+<p>You are reading this in your own browser, served by a local <code>wash</code>
+server pointed at the repository you just cloned. Nothing here leaves your
+machine.</p>
+
+<div class="box">
+  <p><strong>Try the loop.</strong> Type something below — say
+  <code>What is 2+2?</code> — and press <strong>Send</strong>. Your message and
+  its answer are filed as nodes in a tree you can browse by URL.</p>
+  <form onsubmit="return send(event)">
+    <textarea id="msg" rows="3" placeholder="Ask something, e.g. What is 2+2?"></textarea>
+    <div><button>Send</button></div>
+  </form>
+</div>
+
+<h2>Read</h2>
+<ul>
+  <li><a href="/render/ch01.md">Chapter 1 — Getting Started</a>
+      (rendered from a Markdown file by the <code>render</code> command)</li>
+  <li><a href="/ch01.md">the raw source of that chapter</a>
+      (the same file, served as text — strip <code>/render/</code> to see it)</li>
+  <li><a href="/view/notebook/0/0/0">browse the notebook</a>,
+      or the files directly at <a href="/notebook/0/">/notebook/0/</a></li>
+</ul>
+
+<script>
+async function send(e){
+  e.preventDefault();
+  const t=document.getElementById('msg').value;
+  const r=await fetch('/ask',{method:'POST',body:t});
+  const url=(await r.text()).trim();
+  if(url) window.location=url;
+  return false;
+}
+</script>
+</body></html>
