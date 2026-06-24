@@ -14,11 +14,14 @@
 > **The running example (our `hoc`).** TUPE grew a calculator, `hoc`, across the
 > book. We grow a **lab notebook for a working programmer**: viewing a project's
 > files, then searching and reshaping them with pipelines, then saving those
-> pipelines as commands, then accumulating *results* as a navigable tree (SDT),
-> then generating those trees from commands (TPC), then drawing and running the
-> whole workflow as a graph (gripeline). By the last chapter the reader has a
-> reusable, shareable, Git-tracked working environment built entirely from
-> ordinary files.
+> pipelines as commands, then making the browser a real surface — rendering
+> documents (Markdown), driving commands from forms (formdown), and navigating by
+> relative link — then accumulating *results* as a navigable, human-nameable tree
+> (SDT) whose nodes record how they were produced, then generating those trees
+> from commands (TPC), then drawing and running the whole workflow as a graph
+> (gripeline). By the last chapter the reader has a reusable, shareable,
+> Git-tracked working environment built entirely from ordinary files, browsable
+> in the address bar and replayable from the command line.
 >
 > **Scope decision (full ecosystem).** wash is the spine, but SDT, TPC, and
 > gripeline are treated as co-equal members of one environment and are woven in
@@ -56,8 +59,9 @@
     contract and flags where behavior is implementation-defined.
 - **A map of the environment** (one-page diagram, reproduced as a gripeline
   graph later): browser/`curl` → wash runtime → root directory → commands →
-  (optionally) SDT trees ← produced by TPCs; gripeline as the visual notation
-  over the whole thing.
+  (optionally) SDT trees ← produced by TPCs; rendered documents and formdown
+  forms as the browser-facing surface over the same commands; gripeline as the
+  visual notation over the whole thing.
 
 ---
 
@@ -97,7 +101,9 @@ ten minutes.*
   - Bookmarkable, shareable, inspectable: a URL *is* the saved workflow.
 - **1.5 What we just relied on (forward pointers).** A quick list of the
   mechanisms about to be unpacked: literal file mapping, the command path,
-  arity, the implied `cat`. Sets the table for Part II.
+  arity, the implied `cat` (Part II). And further out: rendering and forms as a
+  browser surface (Part V), result trees with readable names and provenance
+  (Part VI). Sets the table for the rest of the book.
 
 ## Chapter 2. The Root, the Filesystem, and the URL
 
@@ -450,21 +456,147 @@ vocabulary.*
 
 ---
 
-# Part V — Trees of Results: SDT and TPC
+# Part V — The Browser as a Surface
+
+*Until now the browser has been a thin client: it shows bytes and follows links.
+This part makes the browser a **surface** — documents that render, forms that
+act, links that navigate a project — without giving up the rule that a URL is
+still just a path or a pipeline. None of this is new runtime machinery: rendering
+and forms are ordinary commands (Part IV) and links are ordinary URLs. This is
+where "the browser is my shell" becomes "the browser is my shell **and** my
+notebook page," and where the round trip to the command line stays honest.*
+
+## Chapter 14. Rendering Documents: Markdown and Beyond
+
+*Goal: turn raw files into readable pages without leaving the file model.*
+
+- **14.1 Raw bytes vs. a rendered view.** `GET /notes.md` returns the file as
+  `text/markdown` (runtime.md §6.1 mime table); *rendering* is a command, not a
+  runtime feature. The file stays the source of truth; rendering is a lens over
+  it. The two URLs coexist: `/notes.md` (read the source) and `/render/notes.md`
+  (read the page).
+- **14.2 The `render` command pattern.** A command that reads Markdown on stdin
+  and emits HTML, declaring `mime text/html` for its stage (Chapter 9 §9.4,
+  runtime.md §12.5). Modeled on the book's own `book/bin/render`:
+  ```
+  GET /render/ch01.md   ≈ sh: cat ch01.md | render
+  ```
+- **14.3 Offering both surfaces is the wash way.** Same file, two URLs: source
+  for transparency, rendered for reading. A rendered page links back to its own
+  raw form, and vice versa — nothing is hidden, presentation is additive.
+- **14.4 Rendering generalizes.** A `view` command that dispatches by suffix
+  (Markdown → HTML, JSON → pretty HTML, `.dot` → an SVG via gripeline, an SDT
+  node → a formatted card). One small renderer per format, each composable like
+  any other stage; reach for a clearer command rather than a cleverer one
+  (echoing §8.7).
+- **14.5 The book is a wash project.** The chapter you are reading is
+  `book/ch01.md`, served raw and rendered by exactly these mechanisms; every
+  figure is a real file under a root (callback to the colophon). Rendering is how
+  a project documents *itself* from inside.
+- **Exercises.** Write a Markdown `render`; add a suffix-dispatching `view`; serve
+  one document both raw and rendered and cross-link the two.
+
+## Chapter 15. formdown: Forms as the Interface to Commands
+
+*Goal: a zero-to-light-JS interactive surface where filling in a form runs a
+pipeline.*
+
+- **15.1 The problem.** A rendered document can *show* results, but a notebook
+  needs *input*: ask a question, set a flag, name a node. The browser already has
+  the control for this — the HTML form — but hand-writing forms and wiring each
+  to a pipeline is tedious and easy to get subtly wrong.
+- **15.2 The formdown idea.** Markdown extended with form fields. A formdown
+  document renders (via a renderer, Chapter 14) to an HTML form whose submission
+  is an *ordinary wash request* — a `GET` or `POST` to a pipeline assembled from
+  the field values. formdown is a **book-defined authoring format layered on
+  commands, not a runtime feature**; the runtime sees only the resulting request.
+- **15.3 A field maps to argv, a path segment, or the body.** How each control
+  becomes a query `arg` (Chapter 5 §5.2), a path argument under a declared arity
+  (Chapter 4), or the request body (Chapter 9 §9.5). The form's `action` is a
+  wash URL; its `method` must satisfy the command's declared `methods`
+  (Chapter 11 §11.4):
+  ```
+  <!-- ask.formdown -->
+  # Ask the notebook
+  question: [_______________]      → POST /ask        (body = question)
+  pattern:  [_____]  ignore-case ☐ → GET  /grep?arg=…  (argv from fields)
+  ```
+- **15.4 A submission is a request you could have typed.** The defining property:
+  a formdown submit produces exactly the URL (and body) you would build by hand —
+  the form is a convenience over the URL, never a hidden side channel. You can
+  inspect it, bookmark it, and replay it with `curl` (forward link to §16.6).
+- **15.5 Forms that drive TPCs.** When a form's action is a tree-producing command
+  (Chapter 18), submitting it is how a conversation takes its next turn — this is
+  the seam from this part into Part VI. Where the response goes (the new leaf) is
+  the adapter/PRG question handled in Chapter 18; on a runtime without
+  command-issued redirects it is a small client-side hop (see authoring notes).
+- **15.6 Progressive enhancement, single-user style.** A bare `<form>` works with
+  zero JavaScript because the submission is just a request; light JS only adds
+  redirect-to-new-leaf and live result panels. Your machine, one user — keep the
+  surface thin and the request legible.
+- **Exercises.** Write an `ask.formdown` that POSTs a question and appends a node;
+  build a form that assembles a two-stage pipeline from two fields; submit the
+  same action by hand with `curl` and confirm it is byte-identical.
+
+## Chapter 16. Links, Navigation, and the Browser as Tree Viewer
+
+*Goal: move through a project — files, pipelines, and result trees — by clicking,
+and carry the same workflow back and forth to the command line.*
+
+- **16.1 A link is a URL is a path-or-pipeline.** Relative links resolve against
+  the current request path by ordinary URL rules (RFC 3986 §5); because wash URLs
+  *are* paths, clicking through a project *is* walking the directory tree. The
+  browser's address bar is a prompt; the page is the output.
+- **16.2 Relative links inside rendered documents.** A link in a rendered
+  Markdown/formdown page can point at a sibling file, a command, or a whole
+  pipeline — the document becomes a launchpad. Authoring links so a moved or
+  cloned root still resolves: prefer root-relative links for stability (callback
+  to §13.5 Git sharing). *(documents → pipelines)*
+- **16.3 What a relative link resolves against under a pipeline.** The subtle
+  case: when the current URL is itself a pipeline
+  (`/grep/x/jq/y/data.json`), a relative link resolves against the *request path*
+  per RFC 3986, **not** against any command segment — there is no "current
+  command directory." The discipline: link to files and roots, not into the
+  middle of a pipeline; use root-relative links when in doubt. *(Flag: exact
+  base-URL behavior for pipeline requests is implementation-defined / not yet
+  normatively specified — state the discipline, not one server's rule.)*
+- **16.4 Navigating an SDT tree by link.** Node → child (`/0/0/0`), node → parent
+  (`..`), node → sibling (`../1`); a directory listing or a small `view` command
+  (Chapter 14) turns an SDT tree into a clickable conversation or experiment
+  browser. Human-readable names (Chapter 17 §17.8) make these links readable
+  instead of ordinal soup. *(between SDT nodes)*
+- **16.5 The browser as command shell *and* tree viewer at once.** Type a pipeline
+  in the address bar to run it; click a listing to browse results; a bookmark is
+  a saved command (callback to §13.3 saved expressions). The same window is both
+  REPL and file browser.
+- **16.6 Moving back and forth with the command line.** Every URL is a `curl`
+  invocation and back again: copy a pipeline from the address bar into a terminal,
+  or paste a constructed URL into the browser. The `X-WebShell-*` execution
+  headers and a `parse-mode raw` explainer (Chapter 12) let you see what a clicked
+  link *would* run before running it — the safe bridge between pointing and
+  shooting. Round-trip a workflow: address bar → `curl` → saved command
+  (Chapter 13) → bookmark.
+- **Exercises.** Build an index page of relative links into an SDT tree; click
+  from a rendered doc straight into a four-stage pipeline; take a URL from the
+  browser, run it with `curl`, then save it as a named command and bookmark it.
+
+---
+
+# Part VI — Trees of Results: SDT and TPC
 
 *Here the ecosystem widens. wash gives us composition over files; now we want to
 **accumulate** results — histories, conversations, explored alternatives — as
 navigable structure. This is the book's "big program" arc, the equivalent of
 TUPE growing `hoc`.*
 
-## Chapter 14. The Sequential Directory Tree (SDT)
+## Chapter 17. The Sequential Directory Tree (SDT)
 
-- **14.1 The problem.** Pipelines are ephemeral (runtime.md §9.7). But a lab
+- **17.1 The problem.** Pipelines are ephemeral (runtime.md §9.7). But a lab
   notebook wants to *keep* results, ordered, branchable, and diffable — without
   inventing a database (a wash non-goal, runtime.md §3).
-- **14.2 The SDT idea.** A tree of *unnamed* files laid out by ordinal directory
+- **17.2 The SDT idea.** A tree of *unnamed* files laid out by ordinal directory
   names: `0`, `1`, …, then `A`, `B`, … — a dense, sortable address space.
-- **14.3 Node anatomy.** `a` holds the node's text; an optional `b` holds
+- **17.3 Node anatomy.** `a` holds the node's text; an optional `b` holds
   metadata; child directories are the next ordinals. A worked tree:
   ```
   root/
@@ -476,26 +608,40 @@ TUPE growing `hoc`.*
           a        # "4"
           b        # created 2026-06-19T14:00:00Z
   ```
-- **14.4 Sidecars and portability.** `.0` sidecar files track state and let
+- **17.4 Sidecars and portability.** `.0` sidecar files track state and let
   `sdt check` verify a tree is well-formed and portable.
-- **14.5 The `sdt` tool, by verb.** `code` (encode/decode/validate indices),
+- **17.5 The `sdt` tool, by verb.** `code` (encode/decode/validate indices),
   `read` (classify entries), `check` (verify sidecars/portability), `sidecar`,
   `name` (next ordinal), `add` (write a node), `compact` (densify ordinals),
   `pack` (bundle/extract). One tiny example per verb.
-- **14.6 Why ordinals instead of names.** Stable addresses, cheap appends,
+- **17.6 Why ordinals instead of names.** Stable addresses, cheap appends,
   natural branching; the same reason URLs in wash are paths.
-- **14.7 SDT *through* wash.** Because a tree is just files, a wash root can
+- **17.7 SDT *through* wash.** Because a tree is just files, a wash root can
   serve it directly: `GET /0/0/a` returns a node's text; a listing browses the
   tree. SDT needs no special runtime support — it rides on Chapter 2.
+- **17.8 A human-readable naming layer over ordinals.** Ordinals are stable
+  addresses but unreadable, so we add a *names* layer that maps readable names to
+  ordinal paths **without moving the nodes**. Distinguish two senses of "name":
+  `sdt name` (§17.5) allocates the next *ordinal*; the layer introduced here maps
+  a human name to an existing ordinal path — an indirection, like a bookmark or a
+  symlink, so `/notebook/pipes-question` resolves to `/notebook/0/3`. Properties:
+  the ordinal tree stays the ground truth; names are an additive overlay, may be
+  many-to-one, and can be added, changed, or dropped without rewriting history (a
+  name is metadata, not structure). Relative links (§16.4) written against names
+  read as prose instead of ordinal soup. *(Flag: this is the model the book
+  adopts; cite SDT's `name` verb for the ordinal side and present the
+  human-name resolution as "introduced here, to be sharpened as SDT's naming
+  layer firms up" rather than as settled law.)*
 - **Exercises.** Build a three-node tree by hand; `sdt add` a fourth; `sdt
-  compact`; serve the tree from a wash root and navigate it in the browser.
+  compact`; give one node a human-readable name and reach it both ways; serve the
+  tree from a wash root and navigate it in the browser.
 
-## Chapter 15. Tree-Producing Commands (TPC)
+## Chapter 18. Tree-Producing Commands (TPC)
 
-- **15.1 The bridge.** A TPC is *a wash command that writes node files into an
+- **18.1 The bridge.** A TPC is *a wash command that writes node files into an
   SDT tree and emits a `Created Node <path>` manifest on stderr.* It joins
-  Chapter 9 (commands) to Chapter 14 (trees).
-- **15.2 The shape of a TPC.** POST-only, `mutates true`, takes a target node as
+  Chapter 9 (commands) to Chapter 17 (trees).
+- **18.2 The shape of a TPC.** POST-only, `mutates true`, takes a target node as
   context, writes a response subtree beneath it:
   ```
   # root/env/meta/ask
@@ -503,7 +649,7 @@ TUPE growing `hoc`.*
   mutates true
   parse-mode raw        # or arity, depending on how the target is addressed
   ```
-- **15.3 A turn.** One POST = an input node plus the response subtree written
+- **18.3 A turn.** One POST = an input node plus the response subtree written
   under it. Worked end to end:
   ```
   POST /tree/0
@@ -517,48 +663,67 @@ TUPE growing `hoc`.*
   Created Node 0/0/0
   ```
   "The last marker line names the redirect leaf."
-- **15.4 Continuations and alternatives.** *Continuation* = a reader-level gloss
+- **18.4 Continuations and alternatives.** *Continuation* = a reader-level gloss
   over successive nodes sharing an `author` metadata value (not structural);
   *alternatives* = sibling branches (≥2 children) recording explored variations.
   How a notebook grows a tree of tries.
-- **15.5 HTTP-ignorance by design.** A TPC knows nothing about HTTP; a separate
+- **18.5 HTTP-ignorance by design.** A TPC knows nothing about HTTP; a separate
   *adapter* command consumes the stderr manifest to synthesize a
   Post/Redirect/Get response and cache headers. Keep the producer pure
   (runtime.md §6, §10 referenced by the TPC spec).
-- **15.6 "The LLM is not special."** Deterministic TPCs (`wc`, a shell command)
+- **18.6 "The LLM is not special."** Deterministic TPCs (`wc`, a shell command)
   and nondeterministic ones (a model call, an Eliza script) are treated
   identically — same contract, same manifest. Why this uniformity matters for
   reproducibility and testing.
-- **15.7 Our notebook becomes a workspace.** Wire `ask` + an adapter so that
+- **18.7 Our notebook becomes a workspace.** Wire `ask` + an adapter so that
   posting a question appends a node and redirects the browser to the new leaf —
   a conversation, command history, or experiment log that *is* a directory tree.
+  The input itself can come from a formdown form (§15.5): submit the form, take a
+  turn, land on the new leaf.
+- **18.8 Tracing a node back to what made it.** Provenance is not new machinery —
+  it is the node's `b` metadata (§17.3) and the `Created Node` manifest (§18.3)
+  read together. A well-behaved TPC records in `b` the command, the *effective
+  pipeline*, the input node(s), and a timestamp, so any node can answer "what
+  command, over what data, produced me?" The `X-WebShell-Command` / `-Pipeline` /
+  `-Source` headers (§12.4) carry the same facts at request time. Because both are
+  plain text under the root, lineage is greppable and Git-diffable, never hidden
+  state — the provenance face of "the LLM is not special" (§18.6): deterministic
+  and nondeterministic producers leave the identical trail.
 - **Exercises.** Write a deterministic TPC (`echo`-as-node); add an adapter that
-  redirects to the leaf; branch an alternative and view both in the browser.
+  redirects to the leaf; have the TPC record its command and inputs into `b`;
+  branch an alternative and view both in the browser.
 
-## Chapter 16. Patterns for Accumulating Work
+## Chapter 19. Patterns for Accumulating and Tracing Work
 
 *Synthesis chapter: SDT + TPC + wash composition as one discipline.*
 
-- **16.1 Append-only thinking.** Results accumulate; you navigate history by URL.
-- **16.2 Branching to explore.** Alternatives as siblings; comparing two leaves
+- **19.1 Append-only thinking.** Results accumulate; you navigate history by URL.
+- **19.2 Branching to explore.** Alternatives as siblings; comparing two leaves
   with a wash `diff` command (Chapter 4) over their `a` files.
-- **16.3 Reading a tree back.** `sdt read` for classification/stats; serving the
+- **19.3 Reading a tree back.** `sdt read` for classification/stats; serving the
   tree for human browsing; pipelines *over* node text (`/grep/TODO/0/3/a`).
-- **16.4 Git as the time machine.** SDT trees are plain files; commit them, diff
+- **19.4 Git as the time machine.** SDT trees are plain files; commit them, diff
   them, share them — the persistence story from Chapter 13 applied to results.
+- **19.5 Tracing lineage end to end.** Put the provenance trail (§18.8) to work:
+  walk a leaf up its parents reading each `b`, or write a `trace` command (a
+  `view`, Chapter 14) that renders a node's full ancestry — command, inputs,
+  output, names (§17.8) — as one page. "How did this result get here?" becomes a
+  link you follow, not an excavation. Provenance plus naming is what keeps an
+  accumulating tree legible as it grows.
 - **Exercises.** Build a small experiment log with three branches and write a
-  one-command "show me all leaves containing X."
+  one-command "show me all leaves containing X"; add a `trace` command that prints
+  a leaf's full lineage from its `b` metadata.
 
 ---
 
-# Part VI — Seeing the Whole: gripeline
+# Part VII — Seeing the Whole: gripeline
 
-## Chapter 17. A Graph Is a Pipeline
+## Chapter 20. A Graph Is a Pipeline
 
-- **17.1 The motivation.** Long linear pipelines (URL or shell) get hard to read;
+- **20.1 The motivation.** Long linear pipelines (URL or shell) get hard to read;
   a graph shows data flow at a glance. gripeline's thesis: *the same file you
   draw is the file you run.*
-- **17.2 The notation.** A Graphviz `dot` digraph where nodes carry commands:
+- **20.2 The notation.** A Graphviz `dot` digraph where nodes carry commands:
   ```
   digraph {
     a [label="cat access.log"]
@@ -568,24 +733,24 @@ TUPE growing `hoc`.*
   }
   ```
   ≈ `cat access.log | grep 404 | wc -l`.
-- **17.3 The three verbs.** `gripeline build foo.dot` (emit bash), `run` (emit +
+- **20.3 The three verbs.** `gripeline build foo.dot` (emit bash), `run` (emit +
   execute), `check` (static validation/executability). One example each.
-- **17.4 What gripeline validates.** Node-role resolution, static checks before
+- **20.4 What gripeline validates.** Node-role resolution, static checks before
   execution — catch a broken graph before it runs.
 - **Exercises.** Draw the Chapter 6 four-stage pipeline as a graph; `build` it;
   `run` it; render it with `dot -Tpng`.
 
-## Chapter 18. gripeline and wash Together
+## Chapter 21. gripeline and wash Together
 
-- **18.1 Two surfaces for one pipeline.** The URL form is great for ad-hoc and
+- **21.1 Two surfaces for one pipeline.** The URL form is great for ad-hoc and
   bookmarking; the graph form is great for branching, documentation, and review.
   Map a wash pipeline URL to its gripeline graph and back, side by side.
-- **18.2 Visualizing wash workflows.** Treat a saved URL expression (Chapter 13)
+- **21.2 Visualizing wash workflows.** Treat a saved URL expression (Chapter 13)
   and a `.dot` graph as two encodings of the same workflow; when to reach for
   which.
-- **18.3 Branching graphs vs. linear URLs.** Where graphs earn their keep:
+- **21.3 Branching graphs vs. linear URLs.** Where graphs earn their keep:
   fan-out/fan-in that a single left-to-right URL cannot express cleanly.
-- **18.4 Serving and running graphs through wash.** A `gripeline` command on the
+- **21.4 Serving and running graphs through wash.** A `gripeline` command on the
   path so `GET /gripeline/check/flow.dot` validates and `POST /gripeline/run/...`
   executes — visualization and execution behind ordinary URLs.
 - **Exercises.** Build a branching graph, validate it through a wash command, and
@@ -593,53 +758,53 @@ TUPE growing `hoc`.*
 
 ---
 
-# Part VII — Putting It All Together
+# Part VIII — Putting It All Together
 
-## Chapter 19. A Complete Project: The Lab Notebook
+## Chapter 22. A Complete Project: The Lab Notebook
 
 *The capstone, in TUPE's "build something real" spirit — every prior mechanism
 appears once, in service of one coherent root.*
 
-- **19.1 The root layout.** A single annotated tree showing `env/path`,
+- **22.1 The root layout.** A single annotated tree showing `env/path`,
   `env/meta/*`, `exec`, `env/mime`, `bin/` commands, an SDT `tree/`, and `.dot`
   graphs — the whole environment on one page.
-- **19.2 Day in the life.** A narrative sequence of real requests: browse files →
+- **22.2 Day in the life.** A narrative sequence of real requests: browse files →
   search with a pipeline → save it as a command → POST a question that appends an
   SDT node via a TPC → branch an alternative → draw the workflow as a graph and
   run it → commit everything to Git.
-- **19.3 Reuse audit.** Trace how each command reuses earlier ones; show the
+- **22.3 Reuse audit.** Trace how each command reuses earlier ones; show the
   dependency graph (as a gripeline diagram, naturally).
-- **19.4 Sharing it.** Clone the root elsewhere; what travels, what is
+- **22.4 Sharing it.** Clone the root elsewhere; what travels, what is
   machine-local (interpreters, binaries), and how to tell (runtime.md §14).
 
-## Chapter 20. Debugging and Diagnostics
+## Chapter 23. Debugging and Diagnostics
 
-- **20.1 Reading status codes as a language.** 400 (your URL), 404 (nothing
+- **23.1 Reading status codes as a language.** 400 (your URL), 404 (nothing
   there), 405 (wrong method), 500 (the *project's* config is wrong) — a decision
   table (runtime.md §15, pipeline_parsing.md §10).
-- **20.2 "Why did my pipeline not parse?"** The arity-0 trap, command/argument
+- **23.2 "Why did my pipeline not parse?"** The arity-0 trap, command/argument
   collisions, `arg` on a non-command segment — each with the fix.
-- **20.3 Inspecting without running.** `parse-mode raw` explainers and
+- **23.3 Inspecting without running.** `parse-mode raw` explainers and
   `X-WebShell-*` headers (Chapter 12).
-- **20.4 Malformed-config 500s.** Bad `exec`, bad `env/meta`, bad `env/mime`,
+- **23.4 Malformed-config 500s.** Bad `exec`, bad `env/meta`, bad `env/mime`,
   bad `env/index`, bad `env/listing` — find them fast.
-- **20.5 SDT/TPC pitfalls.** Non-dense ordinals (`sdt compact`), missing/extra
+- **23.5 SDT/TPC pitfalls.** Non-dense ordinals (`sdt compact`), missing/extra
   sidecars (`sdt check`), a TPC that forgets its manifest line.
 
-## Chapter 21. The wash Way (Epilog)
+## Chapter 24. The wash Way (Epilog)
 
 *The TUPE epilog, restated for wash.*
 
-- **21.1 Small pieces, composed.** The Unix philosophy, relocated to URLs and the
+- **24.1 Small pieces, composed.** The Unix philosophy, relocated to URLs and the
   browser.
-- **21.2 The filesystem as the only database.** Why plain files beat hidden state
+- **24.2 The filesystem as the only database.** Why plain files beat hidden state
   for a single user (runtime.md §3, §14).
-- **21.3 Transparency as a feature.** A URL you can read is a workflow you can
+- **24.3 Transparency as a feature.** A URL you can read is a workflow you can
   trust, share, and modify; commands can still shadow behavior, just like a
   shell (runtime.md §5, "Transparent URL").
-- **21.4 Constraints that liberate.** No multi-user, no sandbox, no package
+- **24.4 Constraints that liberate.** No multi-user, no sandbox, no package
   manager — and how dropping those let wash stay legible.
-- **21.5 Where wash is going.** A measured note on v1's reserved-but-undefined
+- **24.5 Where wash is going.** A measured note on v1's reserved-but-undefined
   surface (range arity, `input file`/`output file`, synthesized-resource
   discovery, a standardized `explain`) and the project's "work in progress"
   status — pointers, not promises (runtime.md §19, pipeline_parsing.md §15).
@@ -672,13 +837,34 @@ appears once, in service of one coherent root.*
   argument segment, input suffix, arity, implied cat, pipeline boundary,
   parse-mode, synthesized resource, transparent URL (runtime.md §5,
   harness/AGENTS.md glossary), plus SDT/TPC/gripeline terms (node, ordinal,
-  sidecar, TPC, turn, continuation, alternative, adapter, gripeline graph).
+  sidecar, TPC, turn, continuation, alternative, adapter, gripeline graph), plus
+  surface/tree terms (render command, formdown, formdown field, relative link,
+  human-readable name vs. ordinal, name layer, provenance, lineage).
 - **Appendix J — From shell to wash.** A translation table: `|`, redirection,
   flags, `grep`/`jq`/`wc`, `|&`, `set -o pipefail` → their wash URL forms (and
   where wash deliberately differs, e.g. no core output redirection).
 - **Appendix K — Building a runtime / conformance.** Pointer to the MVP checklist
   (runtime.md §18), the spec→clause→vector→impl propagation chain, and how to run
   the conformance harness for a new implementation (AGENTS.md).
+- **Appendix L — formdown reference.** The field syntax, how each field maps to a
+  query `arg` / path segment / request body, the `action`/`method` rules against a
+  command's `methods`, and the invariant that a submission equals a hand-typed
+  request (Chapters 14–15). Marked as a book-defined authoring format over
+  commands, not a runtime feature.
+- **Appendix M — Links and navigation.** Relative-link resolution against the
+  request path (RFC 3986 §5), the root-relative-for-stability discipline, SDT node
+  navigation (`..`, `../1`, child ordinals), and the under-specified case of a
+  base URL under a pipeline request (Chapter 16). Flags what is RFC-defined vs.
+  implementation-defined.
+- **Appendix N — The naming layer.** Human-readable names as an additive overlay
+  on ordinal paths: resolution model, many-to-one, add/change/drop without
+  rewriting structure, and the distinction from `sdt name` (next-ordinal
+  allocation) (Chapter 17 §17.8). Presented as introduced-here, to firm up with
+  SDT.
+- **Appendix O — Provenance and tracing.** What a node's `b` should record
+  (command, effective pipeline, input node(s), timestamp), the `Created Node`
+  manifest, the `X-WebShell-*` headers, and how the three line up so lineage stays
+  greppable and Git-diffable (Chapters 18 §18.8, 19 §19.5).
 
 ---
 
@@ -694,12 +880,23 @@ appears once, in service of one coherent root.*
 - **TUPE cadence to preserve.** (1) lead with a problem, (2) smallest complete
   example, (3) generalize, (4) one gotcha, (5) exercises. Keep prose between
   samples tight.
-- **Ecosystem weave.** Per the full-ecosystem decision, SDT/TPC/gripeline are
-  introduced as soon as the motivating need appears (Parts V–VI) and then reused
-  in the capstone, rather than quarantined in a closing survey.
+- **Ecosystem weave.** Per the full-ecosystem decision, the browser surface
+  (rendering/formdown/links, Part V) and SDT/TPC/gripeline (Parts VI–VII) are
+  introduced as soon as the motivating need appears and then reused in the
+  capstone, rather than quarantined in a closing survey.
+- **Book-introduced models to flag, not over-claim.** Three topics in Parts V–VI
+  are presented by the book ahead of (or alongside) the normative specs and must
+  be flagged as such, per the policy below: **formdown** (an authoring format
+  layered on commands, not a runtime feature); the **human-readable naming layer**
+  over SDT ordinals (introduced here, distinct from `sdt name`, to firm up as
+  SDT's naming layer matures); and **node provenance** (a discipline over the `b`
+  metadata + `Created Node` manifest + `X-WebShell-*` headers, not a new
+  mechanism). Relative-link resolution under a *pipeline* request is likewise
+  implementation-defined and should be taught as a discipline.
 - **Open spec questions to track.** Where v1 marks something implementation-
   defined (OPTIONS/CORS, symlink policy, synthesized resources, directory-listing
-  format) or reserved (range arity, `input file`/`output file`, standardized
-  `explain`), the book should say "implementation-defined / not yet specified"
-  rather than document one server's behavior as law.
+  format, base-URL for a pipeline request) or reserved (range arity, `input
+  file`/`output file`, standardized `explain`), the book should say
+  "implementation-defined / not yet specified" rather than document one server's
+  behavior as law.
 ```
