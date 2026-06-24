@@ -256,6 +256,13 @@ CLAUSE_REGISTRY: dict[str, Clause] = {
         "MUST",
         "rightmost suffix fed via implied cat primitive",
     ),
+    "PP-4-implied-cat-nested": Clause(
+        "PP-4-implied-cat-nested",
+        "pipeline §4",
+        "MUST",
+        "metadata-free command accepts a multi-segment implied-cat suffix when "
+        "the whole suffix resolves to an existing filesystem path",
+    ),
     # pipeline §5 metadata
     "PP-5.1-arity-n": Clause(
         "PP-5.1-arity-n",

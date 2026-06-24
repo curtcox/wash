@@ -10,6 +10,7 @@ from urllib.parse import parse_qsl
 from wash.filesystem import (
     FilesystemResource,
     percent_decode_segment,
+    resolve_under_root,
     split_raw_target,
     try_exact_filesystem,
 )
@@ -333,9 +334,27 @@ def parse_request(
                 and last_stage.metadata.arity == 0
                 and last_stage.metadata.parse_mode == "normal"
             ):
-                raise ParseError(
-                    f"metadata-free command {last_stage.name} cannot consume path argument segments",
+                # pipeline_parsing.md §4/§12.1: a metadata-free command may take a
+                # multi-segment implied-cat suffix as long as that whole suffix
+                # resolves to an existing filesystem path. The discriminator is
+                # filesystem resolution, not segment count. A multi-segment suffix
+                # that does not resolve is genuine (invalid) metadata-free path
+                # args (§13.1/§13.2) and is rejected with 400. A single missing
+                # segment instead falls through to the implied cat, which reports
+                # the absent resource as 404 (§10.2).
+                fs_parts = [
+                    percent_decode_segment(r, for_filesystem=True) for r in remaining
+                ]
+                resolved = resolve_under_root(
+                    root,
+                    fs_parts,
+                    symlink_policy=symlink_policy,
+                    case_sensitive=case_sensitive,
                 )
+                if resolved is None:
+                    raise ParseError(
+                        f"metadata-free command {last_stage.name} cannot consume path argument segments",
+                    )
 
         break
 

@@ -102,6 +102,14 @@ If both foo and bar are metadata-free commands, and /baz/qux.txt exists, this pa
 
 sh cat baz/qux.txt | bar | foo 
 
+The discriminator between a valid implied-cat suffix and invalid path arguments is
+filesystem resolution, not segment count. A metadata-free command may be followed
+by a multi-segment suffix as long as that whole suffix resolves to an existing file
+or directory under the root; it is then the implied-cat input. A multi-segment
+suffix that does not resolve is invalid (§13.1, §13.2) and returns 400. A single
+trailing segment that does not resolve is instead a missing implied-cat resource
+and returns 404 (§10.2).
+
 Metadata-free commands do not infer arity from Unix command names.
 
 Therefore, with all commands metadata-free:

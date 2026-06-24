@@ -74,6 +74,10 @@ def rebuild_commands_mf() -> None:
     setup_bin(root, "cat", "identity", "grep", "filter")
     write(root / "env" / "meta" / "filter", "arity 1\n")
     write(root / "data.txt", "alpha\nbravo\ncharlie\n")
+    # Nested file used by the multi-segment implied-cat vectors: a metadata-free
+    # command followed by a multi-segment suffix that *resolves* to a real file
+    # is a valid implied cat (pipeline_parsing.md §4/§12.1).
+    write(root / "nested" / "data.txt", "delta\necho\n")
 
 
 def rebuild_body_input() -> None:

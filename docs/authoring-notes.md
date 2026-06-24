@@ -29,14 +29,25 @@ prints the leaf URL and the home page's JS navigates there. A spec-conformant
 server that supports full HTTP responses could do the redirect server-side via a
 TPC adapter, as the TPC spec describes. Flag for Ch15.
 
-**Spec/impl finding (worth raising with maintainers).** `pipeline_parsing.md`
-§4/§12.1 shows a metadata-free command taking a *multi-segment* nested input
-suffix (`cat b/c.txt | a`), but the reference parser and the conformance vector
-`mf-multi-path-args-400` (`/identity/extra/data.txt` → 400) reject any
-metadata-free command followed by more than one suffix segment. That is why
-`render` is addressed as `/render/ch01.md` (single-segment suffix), and why book
-chapters are kept flat under `book/` rather than in a subdirectory. Either the
-spec example or the parser/vector should change; they currently disagree.
+**Spec/impl finding (resolved).** `pipeline_parsing.md` §4/§12.1 shows a
+metadata-free command taking a *multi-segment* nested input suffix
+(`cat b/c.txt | a`). The reference parser previously rejected *any* metadata-free
+command followed by more than one suffix segment, using segment count rather than
+filesystem resolution as the test — so a nested suffix that genuinely resolved to
+a file (e.g. `/identity/nested/data.txt`) was wrongly 400. Fixed in favor of the
+spec (Option A): the parser now allows a multi-segment suffix when the whole
+suffix resolves to an existing path (implied cat), and only returns 400 when it
+does not (`/identity/extra/data.txt` → 400, vector `mf-path-args-400`). A single
+missing segment is still a 404 missing-resource (`/wc/missing-input.json`, vector
+`prec-missing-suffix-404`). §4 now states the resolution-based rule normatively,
+and vectors `mf-implied-cat-nested` / `mf-pipeline-nested` cover the positive
+case. The previously cited vector id was a slip: `mf-multi-path-args-400` is
+`/identity/grep/needle/data.txt`; the `/identity/extra/data.txt` case is
+`mf-path-args-400`.
+
+Because nested suffixes now work, book chapters could live in subdirectories;
+they are still kept flat under `book/` by choice, not by constraint, and `render`
+is addressed as `/render/ch01.md` for simplicity.
 
 **Spec fidelity checkpoints exercised by the scaffold:** URL→path mapping
 (runtime.md §6.1), directory index-vs-listing (§6.5), GET-never-mutates (§9.1),

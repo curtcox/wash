@@ -11,6 +11,30 @@
       identity():charlie
     no_mutation: true
 
+- id: mf-implied-cat-nested
+  clauses: [PP-4-implied-cat-nested, PP-4-implied-cat, PP-2-parse-algo]
+  tier: MUST
+  root: commands-mf
+  request: { method: GET, target: "/identity/nested/data.txt" }
+  expect:
+    status: 200
+    body_exact: |
+      identity():delta
+      identity():echo
+    no_mutation: true
+
+- id: mf-pipeline-nested
+  clauses: [PP-4-implied-cat-nested, PP-2-parse-algo]
+  tier: MUST
+  root: commands-mf
+  request: { method: GET, target: "/cat/identity/nested/data.txt" }
+  expect:
+    status: 200
+    body_exact: |
+      cat():identity():delta
+      cat():identity():echo
+    no_mutation: true
+
 - id: mf-arity0-closed-stdin
   clauses: [PP-4-arity0-default, PP-5.3-input-stdout]
   tier: MUST
