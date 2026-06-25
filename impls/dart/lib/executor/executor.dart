@@ -113,7 +113,9 @@ bool _ruleMatches(ExecRule rule, String commandPath, String commandDir) {
   }
   String rel;
   try {
-    rel = commandPath.replaceFirst(commandDir, '').replaceFirst(RegExp(r'^[/\\]'), '');
+    rel = commandPath
+        .replaceFirst(commandDir, '')
+        .replaceFirst(RegExp(r'^[/\\]'), '');
     rel = rel.replaceAll('\\', '/');
   } catch (_) {
     rel = basename;
@@ -151,8 +153,8 @@ List<String> resolveInvocation(
       break;
     }
   }
-  commandDir ??= commandPath.substring(
-      0, commandPath.lastIndexOf(Platform.pathSeparator));
+  commandDir ??=
+      commandPath.substring(0, commandPath.lastIndexOf(Platform.pathSeparator));
 
   for (final rule in execConfig.rules) {
     if (_ruleMatches(rule, commandPath, commandDir)) {
@@ -200,21 +202,21 @@ Future<(int, List<int>, List<int>)> _runProcess(
   }
   await process.stdin.close();
 
-  final stdoutFuture = process.stdout.fold<List<int>>(
-      [], (prev, chunk) => [...prev, ...chunk]);
+  final stdoutFuture =
+      process.stdout.fold<List<int>>([], (prev, chunk) => [...prev, ...chunk]);
   if (mergeStderr) {
     // stderr is already merged into stdout by redirecting stderr to stdout
     // We need a different approach: use process.stderr and interleave
     // For merge, we collect stderr separately but append to stdout result
-    final stderrFuture =
-        process.stderr.fold<List<int>>([], (prev, chunk) => [...prev, ...chunk]);
+    final stderrFuture = process.stderr
+        .fold<List<int>>([], (prev, chunk) => [...prev, ...chunk]);
     final exitCode = await process.exitCode;
     final stdoutBytes = await stdoutFuture;
     final stderrBytes = await stderrFuture;
     return (exitCode, [...stdoutBytes, ...stderrBytes], <int>[]);
   } else {
-    final stderrFuture =
-        process.stderr.fold<List<int>>([], (prev, chunk) => [...prev, ...chunk]);
+    final stderrFuture = process.stderr
+        .fold<List<int>>([], (prev, chunk) => [...prev, ...chunk]);
     final exitCode = await process.exitCode;
     final stdoutBytes = await stdoutFuture;
     final stderrBytes = await stderrFuture;
@@ -231,7 +233,8 @@ Future<PipelineResult> executeRawCommand(
   required List<int> body,
 }) async {
   final stage = raw.stage;
-  final invocation = resolveInvocation(stage.commandPath, commandDirs, execConfig);
+  final invocation =
+      resolveInvocation(stage.commandPath, commandDirs, execConfig);
   final fullInvocation = [...invocation, raw.rawSuffix];
   final stdinData = body.isNotEmpty ? body : null;
   final (exitCode, stdout, stderr) = await _runProcess(
@@ -293,7 +296,18 @@ Future<PipelineResult> executePipeline(
       if (msg.contains('directory')) {
         throw ExecutionError(e.message, status: 400);
       }
+      if (msg.contains('escapes root') || msg.contains('not permitted')) {
+        throw ExecutionError(e.message, status: 403);
+      }
       throw ExecutionError(e.message, status: 404);
+    } on NameEscapeError {
+      throw ExecutionError('path not permitted', status: 403);
+    } on NameLoopError {
+      throw ExecutionError('name resolution loop detected', status: 508);
+    } on RootEscapeError {
+      throw ExecutionError('path not permitted', status: 403);
+    } on SymlinkEscapeError {
+      throw ExecutionError('path not permitted', status: 403);
     }
   } else if (body.isNotEmpty) {
     stdinData = body;
@@ -326,8 +340,7 @@ Future<PipelineResult> executePipeline(
     currentInput = stdout;
   }
 
-  final firstFail =
-      _firstFailingInUrlOrder(stages, stageResults);
+  final firstFail = _firstFailingInUrlOrder(stages, stageResults);
   if (firstFail != null) {
     return PipelineResult(
       stdout: firstFail.stdout,

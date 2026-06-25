@@ -215,6 +215,9 @@ class WashServer {
     FilesystemResource resource,
   ) async {
     final omitBody = request.method == 'HEAD';
+    final extraHeaders = resource.viaIndirection
+        ? <String, String>{'X-WebShell-Resolved-Path': resource.path}
+        : null;
     try {
       if (resource.kind == ResourceKind.file) {
         final data = readFileBytes(resource.path);
@@ -223,6 +226,7 @@ class WashServer {
           200,
           data,
           contentType: inferMime(resource.path, root: _config.root),
+          extraHeaders: extraHeaders,
           omitBody: omitBody,
         );
         return;
@@ -236,6 +240,7 @@ class WashServer {
           200,
           data,
           contentType: inferMime(index, root: _config.root),
+          extraHeaders: extraHeaders,
           omitBody: omitBody,
         );
         return;
@@ -256,6 +261,7 @@ class WashServer {
       200,
       listing,
       contentType: 'text/plain; charset=utf-8',
+      extraHeaders: extraHeaders,
       omitBody: omitBody,
     );
   }
@@ -278,12 +284,49 @@ class WashServer {
     if (method == 'PUT') {
       final body = await _requestBody(request);
       try {
+        final resolved = resolveUnderRoot(_config.root, parts);
+        if (resolved != null) {
+          final stat = FileStat.statSync(resolved);
+          if (stat.type != FileSystemEntityType.directory) {
+            final normalized = normalizePathParts(parts);
+            var literalTarget = _config.root;
+            for (final part in normalized) {
+              literalTarget = '$literalTarget${Platform.pathSeparator}$part';
+            }
+            var resolvedLiteral = literalTarget;
+            try {
+              resolvedLiteral = File(literalTarget).resolveSymbolicLinksSync();
+            } catch (_) {
+              try {
+                resolvedLiteral =
+                    Directory(literalTarget).resolveSymbolicLinksSync();
+              } catch (_) {}
+            }
+            if (File(resolved).absolute.path !=
+                File(resolvedLiteral).absolute.path) {
+              File(resolved).writeAsBytesSync(body);
+              await _sendResponse(
+                request.response,
+                200,
+                [],
+                contentType: 'text/plain; charset=utf-8',
+              );
+              return;
+            }
+          }
+        }
         putFile(_config.root, parts, body, createParents: true);
       } on RootEscapeError {
         await _sendErrorReq(request, 403, 'path not permitted');
         return;
       } on SymlinkEscapeError {
         await _sendErrorReq(request, 403, 'path not permitted');
+        return;
+      } on NameEscapeError {
+        await _sendErrorReq(request, 403, 'path not permitted');
+        return;
+      } on NameLoopError {
+        await _sendErrorReq(request, 508, 'name resolution loop detected');
         return;
       } on FileSystemException catch (e) {
         final msg = e.message.toLowerCase();
@@ -314,6 +357,12 @@ class WashServer {
         return;
       } on SymlinkEscapeError {
         await _sendErrorReq(request, 403, 'path not permitted');
+        return;
+      } on NameEscapeError {
+        await _sendErrorReq(request, 403, 'path not permitted');
+        return;
+      } on NameLoopError {
+        await _sendErrorReq(request, 508, 'name resolution loop detected');
         return;
       } on FileSystemException catch (e) {
         final msg = e.message.toLowerCase();
@@ -414,20 +463,18 @@ class WashServer {
         extra['command'] = fail.name;
         extra['exit_status'] = fail.exitCode;
         if (fail.stdout.isNotEmpty) {
-          extra['stdout'] = utf8
-              .decode(fail.stdout, allowMalformed: true)
-              .substring(
-                0,
-                fail.stdout.length > 8192 ? 8192 : fail.stdout.length,
-              );
+          extra['stdout'] =
+              utf8.decode(fail.stdout, allowMalformed: true).substring(
+                    0,
+                    fail.stdout.length > 8192 ? 8192 : fail.stdout.length,
+                  );
         }
         if (fail.stderr.isNotEmpty) {
-          extra['stderr'] = utf8
-              .decode(fail.stderr, allowMalformed: true)
-              .substring(
-                0,
-                fail.stderr.length > 8192 ? 8192 : fail.stderr.length,
-              );
+          extra['stderr'] =
+              utf8.decode(fail.stderr, allowMalformed: true).substring(
+                    0,
+                    fail.stderr.length > 8192 ? 8192 : fail.stderr.length,
+                  );
         }
       }
       await _sendErrorReq(
@@ -578,9 +625,7 @@ class _PatchedServerSocket extends Stream<Socket> implements ServerSocket {
     void Function()? onDone,
     bool? cancelOnError,
   }) {
-    return _raw
-        .map(_PatchedSocket.new)
-        .listen(
+    return _raw.map(_PatchedSocket.new).listen(
           onData,
           onError: onError,
           onDone: onDone,
@@ -617,12 +662,13 @@ class _PatchedSocket extends Stream<Uint8List> implements Socket {
     Function? onError,
     void Function()? onDone,
     bool? cancelOnError,
-  }) => _ctrl.stream.listen(
-    onData,
-    onError: onError,
-    onDone: onDone,
-    cancelOnError: cancelOnError,
-  );
+  }) =>
+      _ctrl.stream.listen(
+        onData,
+        onError: onError,
+        onDone: onDone,
+        cancelOnError: cancelOnError,
+      );
 
   // ---- IOSink (writes from server → client) --------------------------------
 

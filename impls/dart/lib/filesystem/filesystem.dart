@@ -22,14 +22,34 @@ class SymlinkEscapeError implements Exception {
   String toString() => 'SymlinkEscapeError: $message';
 }
 
+class NameEscapeError implements Exception {
+  final String message;
+  NameEscapeError(this.message);
+  @override
+  String toString() => 'NameEscapeError: $message';
+}
+
+class NameLoopError implements Exception {
+  final String message;
+  NameLoopError(this.message);
+  @override
+  String toString() => 'NameLoopError: $message';
+}
+
 enum ResourceKind { file, directory }
 
 class FilesystemResource {
   final ResourceKind kind;
   final String path;
   final String relPath;
+  final bool viaIndirection;
 
-  FilesystemResource(this.kind, this.path, this.relPath);
+  FilesystemResource(
+    this.kind,
+    this.path,
+    this.relPath, {
+    this.viaIndirection = false,
+  });
 }
 
 const Map<String, String> fallbackMimeTable = {
@@ -210,39 +230,164 @@ String? _lookupChild(
   return null;
 }
 
-String? _walkUnderRoot(
+class _NameScope {
+  final String dir;
+  final Map<String, List<String>> table;
+
+  _NameScope(this.dir, this.table);
+}
+
+class _HopBudget {
+  int used = 0;
+  final int maxDepth;
+
+  _HopBudget(this.maxDepth);
+
+  void consume(String message) {
+    used += 1;
+    if (used > maxDepth) throw NameLoopError(message);
+  }
+}
+
+Map<String, List<String>> _loadNameTable(String directory) {
+  final table = <String, List<String>>{};
+  final cFile = File('$directory${Platform.pathSeparator}c');
+  if (!cFile.existsSync()) return table;
+  try {
+    for (final line in _envConfigLines(cFile.path)) {
+      final tokens = line.split(RegExp(r'\s+'));
+      if (tokens.length < 2) continue;
+      table[tokens[0]] = tokens.sublist(1);
+    }
+  } catch (_) {
+    return <String, List<String>>{};
+  }
+  return table;
+}
+
+List<_NameScope> _scopeFor(String root, String node) {
+  final realRoot = _resolveReal(root);
+  final realNode = _resolveReal(node);
+  final chain = <_NameScope>[_NameScope(realRoot, _loadNameTable(realRoot))];
+  if (!_isUnderRoot(realRoot, realNode)) return chain;
+
+  var rel = realNode.substring(realRoot.length);
+  rel = rel.replaceFirst(RegExp(r'^[/\\]'), '');
+  if (rel.isEmpty) return chain;
+
+  var current = realRoot;
+  for (final part in rel.split(RegExp(r'[/\\]+'))) {
+    if (part.isEmpty) continue;
+    current = '$current${Platform.pathSeparator}$part';
+    if (Directory(current).existsSync()) {
+      chain.add(_NameScope(current, _loadNameTable(current)));
+    }
+  }
+  return chain;
+}
+
+String? _resolveWalk(
   String root,
+  String base,
+  List<_NameScope> baseScope,
   List<String> relParts, {
-  required String symlinkPolicy,
+  required String escapePolicy,
   required bool caseSensitive,
+  required _HopBudget hops,
 }) {
-  String current = root;
+  String current = base;
+  var scope = List<_NameScope>.from(baseScope);
   for (final part in normalizePathParts(relParts)) {
     final dirStat = FileStat.statSync(current);
     if (dirStat.type != FileSystemEntityType.directory) return null;
 
     final next = _lookupChild(current, part, caseSensitive: caseSensitive);
-    if (next == null) return null;
+    if (next != null) {
+      final linkCheck = Link(next);
+      if (linkCheck.existsSync()) {
+        hops.consume('resolution depth exceeded');
+        final target = linkCheck.resolveSymbolicLinksSync();
+        if (escapePolicy == 'reject-escaping' && !_isUnderRoot(root, target)) {
+          throw SymlinkEscapeError('symlink escapes root');
+        }
+        if (escapePolicy == 'unsupported') {
+          throw SymlinkEscapeError('symlinks unsupported');
+        }
+        current = target;
+      } else {
+        current = next;
+      }
 
-    final linkCheck = Link(next);
-    if (linkCheck.existsSync()) {
-      final target = linkCheck.resolveSymbolicLinksSync();
-      if (symlinkPolicy == 'reject-escaping' && !_isUnderRoot(root, target)) {
-        throw SymlinkEscapeError('symlink escapes root');
+      if (Directory(current).existsSync()) {
+        scope.add(_NameScope(current, _loadNameTable(current)));
       }
-      if (symlinkPolicy == 'unsupported') {
-        throw SymlinkEscapeError('symlinks unsupported');
-      }
-      current = target;
-    } else {
-      current = next;
+      continue;
     }
-  }
-  final resolvedCurrent = _resolveReal(current);
-  if (!_isUnderRoot(root, resolvedCurrent)) {
-    throw RootEscapeError('path escapes root');
+
+    String? resolved;
+    for (var level = scope.length - 1; level >= 0; level--) {
+      final targets = scope[level].table[part];
+      if (targets == null) continue;
+
+      for (final target in targets) {
+        hops.consume('name resolution depth exceeded');
+        var targetBase = scope[level].dir;
+        var targetRaw = target;
+        if (target.startsWith('/')) {
+          targetBase = root;
+          targetRaw = target.replaceFirst(RegExp(r'^/+'), '');
+        }
+        final targetParts = normalizePathParts(targetRaw.split('/'));
+        final node = _resolveWalk(
+          root,
+          targetBase,
+          _scopeFor(root, targetBase),
+          targetParts,
+          escapePolicy: escapePolicy,
+          caseSensitive: caseSensitive,
+          hops: hops,
+        );
+        if (node == null) continue;
+        final realNode = _resolveReal(node);
+        if (!_isUnderRoot(root, realNode) && escapePolicy != 'follow') {
+          throw NameEscapeError('name target escapes root');
+        }
+        resolved = node;
+        break;
+      }
+      break;
+    }
+
+    if (resolved == null) return null;
+    current = resolved;
+    scope = _scopeFor(root, current);
   }
   return current;
+}
+
+String? _walkUnderRoot(
+  String root,
+  List<String> relParts, {
+  required String symlinkPolicy,
+  required bool caseSensitive,
+  int maxDepth = 40,
+}) {
+  final rootResolved = _resolveReal(root);
+  final resolved = _resolveWalk(
+    rootResolved,
+    rootResolved,
+    _scopeFor(rootResolved, rootResolved),
+    normalizePathParts(relParts),
+    escapePolicy: symlinkPolicy,
+    caseSensitive: caseSensitive,
+    hops: _HopBudget(maxDepth),
+  );
+  if (resolved == null) return null;
+  final resolvedCurrent = _resolveReal(resolved);
+  if (!_isUnderRoot(rootResolved, resolvedCurrent)) {
+    throw RootEscapeError('path escapes root');
+  }
+  return resolvedCurrent;
 }
 
 String _resolveReal(String path) {
@@ -321,15 +466,45 @@ FilesystemResource? tryExactFilesystem(
   } catch (_) {
     rel = '';
   }
+  final requested =
+      normalizePathParts(decodedParts).join(Platform.pathSeparator);
+  final viaIndirection = rel != requested.replaceAll('\\', '/');
 
   if (stat.type == FileSystemEntityType.directory) {
-    return FilesystemResource(ResourceKind.directory, resolved, rel);
+    return FilesystemResource(
+      ResourceKind.directory,
+      resolved,
+      rel,
+      viaIndirection: viaIndirection,
+    );
   }
   if (stat.type == FileSystemEntityType.file ||
       stat.type == FileSystemEntityType.link) {
-    return FilesystemResource(ResourceKind.file, resolved, rel);
+    return FilesystemResource(
+      ResourceKind.file,
+      resolved,
+      rel,
+      viaIndirection: viaIndirection,
+    );
   }
   return null;
+}
+
+String? resolveUnderRoot(
+  String root,
+  List<String> relParts, {
+  String symlinkPolicy = 'reject-escaping',
+  bool caseSensitive = true,
+}) {
+  if (relParts.isEmpty) {
+    return Directory(root).existsSync() ? _resolveReal(root) : null;
+  }
+  return _walkUnderRoot(
+    root,
+    relParts,
+    symlinkPolicy: symlinkPolicy,
+    caseSensitive: caseSensitive,
+  );
 }
 
 String inferMime(String path, {String? root}) {

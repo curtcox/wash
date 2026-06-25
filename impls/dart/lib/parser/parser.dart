@@ -152,7 +152,8 @@ List<String>? coreArgvFromQuery(List<(String, String)> queryItems) {
 }
 
 List<String> loadCommandPath(String root) {
-  final pathFile = File('$root${Platform.pathSeparator}env${Platform.pathSeparator}path');
+  final pathFile =
+      File('$root${Platform.pathSeparator}env${Platform.pathSeparator}path');
   final dirs = <String>[];
   if (!pathFile.existsSync()) return dirs;
   for (final line in pathFile.readAsLinesSync()) {
@@ -175,8 +176,7 @@ List<String> loadCommandPath(String root) {
 String? resolveCommand(String name, List<String> commandDirs,
     {bool caseSensitive = true}) {
   for (final dir in commandDirs) {
-    final candidate =
-        '$dir${Platform.pathSeparator}$name';
+    final candidate = '$dir${Platform.pathSeparator}$name';
     final stat = FileStat.statSync(candidate);
     if (stat.type == FileSystemEntityType.file ||
         stat.type == FileSystemEntityType.link) {
@@ -185,8 +185,7 @@ String? resolveCommand(String name, List<String> commandDirs,
     if (!caseSensitive) {
       try {
         for (final entry in Directory(dir).listSync(followLinks: false)) {
-          final entryName =
-              entry.path.split(Platform.pathSeparator).last;
+          final entryName = entry.path.split(Platform.pathSeparator).last;
           if (entryName.toLowerCase() == name.toLowerCase()) {
             final s = FileStat.statSync(entry.path);
             if (s.type == FileSystemEntityType.file ||
@@ -203,7 +202,8 @@ String? resolveCommand(String name, List<String> commandDirs,
 
 bool isCommand(String name, List<String> commandDirs,
     {bool caseSensitive = true}) {
-  return resolveCommand(name, commandDirs, caseSensitive: caseSensitive) != null;
+  return resolveCommand(name, commandDirs, caseSensitive: caseSensitive) !=
+      null;
 }
 
 String _remainingRawSuffix(List<String> rawSegments, int start) {
@@ -239,12 +239,19 @@ ParseResult parseRequest(
   String target = rawTarget.split('#')[0];
   final segments = splitRawTarget(target);
 
-  final fs = tryExactFilesystem(
-    root,
-    segments,
-    symlinkPolicy: symlinkPolicy,
-    caseSensitive: caseSensitive,
-  );
+  FilesystemResource? fs;
+  try {
+    fs = tryExactFilesystem(
+      root,
+      segments,
+      symlinkPolicy: symlinkPolicy,
+      caseSensitive: caseSensitive,
+    );
+  } on NameEscapeError {
+    throw ParseError('name target escapes root', status: 403);
+  } on NameLoopError {
+    throw ParseError('name resolution loop detected', status: 508);
+  }
   if (fs != null) {
     return ParseResultFilesystem(fs);
   }
@@ -296,7 +303,8 @@ ParseResult parseRequest(
         stderrMergeBoundary: seg.stderrMerge,
         rawSegment: seg.raw,
       );
-      return ParseResultRaw(RawCommandParse(stage: stage, rawSuffix: rawSuffix));
+      return ParseResultRaw(
+          RawCommandParse(stage: stage, rawSuffix: rawSuffix));
     }
 
     final queryArgv = coreArgvFromQuery(seg.queryItems);
@@ -345,9 +353,8 @@ ParseResult parseRequest(
                 'core arg query on non-command segment ${argSeg.name}');
           }
         }
-        argv.add(percentDecodeSegment(
-            segments[idx + offset],
-            forFilesystem: false));
+        argv.add(
+            percentDecodeSegment(segments[idx + offset], forFilesystem: false));
       }
       idx += 1 + arity;
     }
@@ -396,9 +403,34 @@ ParseResult parseRequest(
       if (!lastStage.argvFromQuery &&
           lastStage.metadata.arity == 0 &&
           lastStage.metadata.parseMode == 'normal') {
-        throw ParseError(
-          'metadata-free command ${lastStage.name} cannot consume path argument segments',
-        );
+        final fsParts = <String>[];
+        for (final raw in remaining) {
+          try {
+            fsParts.add(percentDecodeSegment(raw, forFilesystem: true));
+          } on PathSegmentError {
+            throw ParseError(
+              'metadata-free command ${lastStage.name} cannot consume path argument segments',
+            );
+          }
+        }
+        String? resolved;
+        try {
+          resolved = resolveUnderRoot(
+            root,
+            fsParts,
+            symlinkPolicy: symlinkPolicy,
+            caseSensitive: caseSensitive,
+          );
+        } on NameEscapeError {
+          throw ParseError('name target escapes root', status: 403);
+        } on NameLoopError {
+          throw ParseError('name resolution loop detected', status: 508);
+        }
+        if (resolved == null) {
+          throw ParseError(
+            'metadata-free command ${lastStage.name} cannot consume path argument segments',
+          );
+        }
       }
     }
 
