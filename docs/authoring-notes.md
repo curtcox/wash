@@ -57,8 +57,11 @@ layout (`a` text, `b` metadata, ordinal dirs) written by a TPC with a
 `Created Node` manifest.
 
 **Naming-model spine.** The "two kinds of file" framing (read vs. run) is the
-agreed naming model; the human-readable indirection layer is deliberately
-deferred (noted in §1.4 and §1.5).
+agreed naming model. The human-readable indirection layer is no longer
+speculative: it is specified in `runtime.md` §6.6 (a directory's `c` file) and
+implemented in the reference server. The ch01 scaffold may still choose not to
+exercise it — keeping the opening focused on ordinals — but where §1.4 and §1.5
+forward-reference it, they point to settled behavior, not a deferred idea.
 
 **Live panel.** A plain `fetch` POST + JS redirect — needed because PRG is
 client-side here. A pure zero-JS `<form>` would post fine but could not then

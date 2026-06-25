@@ -611,30 +611,46 @@ TUPE growing `hoc`.*
 - **17.4 Sidecars and portability.** `.0` sidecar files track state and let
   `sdt check` verify a tree is well-formed and portable.
 - **17.5 The `sdt` tool, by verb.** `code` (encode/decode/validate indices),
-  `read` (classify entries), `check` (verify sidecars/portability), `sidecar`,
-  `name` (next ordinal), `add` (write a node), `compact` (densify ordinals),
-  `pack` (bundle/extract). One tiny example per verb.
+  `read` (classify entries), `check` (verify sidecars/portability *and* lint
+  name resolution per `tools/sdt/` — cycles and dangling targets are errors,
+  escapes and malformed `c` lines warnings), `sidecar`, `name` (next ordinal —
+  distinct from the human-name `c`-file layer of §17.8), `add` (write a node),
+  `compact` (densify ordinals), `pack` (bundle/extract). One tiny example per
+  verb.
 - **17.6 Why ordinals instead of names.** Stable addresses, cheap appends,
   natural branching; the same reason URLs in wash are paths.
 - **17.7 SDT *through* wash.** Because a tree is just files, a wash root can
   serve it directly: `GET /0/0/a` returns a node's text; a listing browses the
   tree. SDT needs no special runtime support — it rides on Chapter 2.
 - **17.8 A human-readable naming layer over ordinals.** Ordinals are stable
-  addresses but unreadable, so we add a *names* layer that maps readable names to
-  ordinal paths **without moving the nodes**. Distinguish two senses of "name":
-  `sdt name` (§17.5) allocates the next *ordinal*; the layer introduced here maps
-  a human name to an existing ordinal path — an indirection, like a bookmark or a
-  symlink, so `/notebook/pipes-question` resolves to `/notebook/0/3`. Properties:
-  the ordinal tree stays the ground truth; names are an additive overlay, may be
-  many-to-one, and can be added, changed, or dropped without rewriting history (a
-  name is metadata, not structure). Relative links (§16.4) written against names
-  read as prose instead of ordinal soup. *(Flag: this is the model the book
-  adopts; cite SDT's `name` verb for the ordinal side and present the
-  human-name resolution as "introduced here, to be sharpened as SDT's naming
-  layer firms up" rather than as settled law.)*
+  addresses but unreadable, so a *names* layer maps readable names to ordinal
+  paths **without moving the nodes**. This is settled, normative behavior:
+  name resolution is specified in `runtime.md` §6.6 and implemented in the
+  reference server. The mechanism is a directory's `c` file — the §5.5 metadata
+  line grammar, one `name target...` entry per line — mapping a human name to a
+  target path. Resolution is universal (every root) and consulted only on a
+  literal-child miss, so real entries (including the reserved `a`/`b`/`c` and
+  symlinks) always shadow names; it is prefix-scoped, nearest-(deepest)-scope
+  winning, and a resolved name jumps the walk to its target as if the URL had been
+  the target path. A name is usable directly in a URL for any method (GET/HEAD/
+  POST/DELETE resolve; PUT overwrites a resolved existing target, else creates
+  literally), so `/notebook/pipes-question` resolves to `/notebook/0/3`.
+  Distinguish two senses of "name": `sdt name` (§17.5) allocates the next
+  *ordinal*; the `c`-file layer maps a human name to an *existing* ordinal path —
+  an indirection, like a bookmark or a symlink. Properties: the ordinal tree
+  stays the ground truth; names are an additive overlay, may be many-to-one
+  (targets are alternatives tried in order), and can be added, changed, or dropped
+  without rewriting history (a name is metadata, not structure). Targets may be
+  root-relative, node-relative, or chained (name→name to a fixpoint); name and
+  symlink hops share one depth budget (508 on overflow/cycle, 404 dangling), and
+  escapes leaving the root are governed by the `escape_policy` capability
+  (default `reject-escaping` → 403). Provenance is reported via the
+  `X-WebShell-Resolved-Path` header. Relative links (§16.4) written against names
+  read as prose instead of ordinal soup.
 - **Exercises.** Build a three-node tree by hand; `sdt add` a fourth; `sdt
-  compact`; give one node a human-readable name and reach it both ways; serve the
-  tree from a wash root and navigate it in the browser.
+  compact`; add a `c`-file entry giving one node a human-readable name and reach
+  it both ways (by name and by ordinal path); serve the tree from a wash root and
+  navigate it in the browser.
 
 ## Chapter 18. Tree-Producing Commands (TPC)
 
@@ -857,10 +873,11 @@ appears once, in service of one coherent root.*
   base URL under a pipeline request (Chapter 16). Flags what is RFC-defined vs.
   implementation-defined.
 - **Appendix N — The naming layer.** Human-readable names as an additive overlay
-  on ordinal paths: resolution model, many-to-one, add/change/drop without
-  rewriting structure, and the distinction from `sdt name` (next-ordinal
-  allocation) (Chapter 17 §17.8). Presented as introduced-here, to firm up with
-  SDT.
+  on ordinal paths: the `c`-file resolution model, many-to-one, add/change/drop
+  without rewriting structure, and the distinction from `sdt name` (next-ordinal
+  allocation) (Chapter 17 §17.8). Normative in `runtime.md` §6.6; statically
+  linted by `sdt check` (`tools/sdt/`); escapes governed by the `escape_policy`
+  capability.
 - **Appendix O — Provenance and tracing.** What a node's `b` should record
   (command, effective pipeline, input node(s), timestamp), the `Created Node`
   manifest, the `X-WebShell-*` headers, and how the three line up so lineage stays
@@ -884,17 +901,22 @@ appears once, in service of one coherent root.*
   (rendering/formdown/links, Part V) and SDT/TPC/gripeline (Parts VI–VII) are
   introduced as soon as the motivating need appears and then reused in the
   capstone, rather than quarantined in a closing survey.
-- **Book-introduced models to flag, not over-claim.** Three topics in Parts V–VI
+- **Book-introduced models to flag, not over-claim.** Two topics in Parts V–VI
   are presented by the book ahead of (or alongside) the normative specs and must
   be flagged as such, per the policy below: **formdown** (an authoring format
-  layered on commands, not a runtime feature); the **human-readable naming layer**
-  over SDT ordinals (introduced here, distinct from `sdt name`, to firm up as
-  SDT's naming layer matures); and **node provenance** (a discipline over the `b`
-  metadata + `Created Node` manifest + `X-WebShell-*` headers, not a new
-  mechanism). Relative-link resolution under a *pipeline* request is likewise
-  implementation-defined and should be taught as a discipline.
+  layered on commands, not a runtime feature); and **node provenance** (a
+  discipline over the `b` metadata + `Created Node` manifest + `X-WebShell-*`
+  headers, not a new mechanism — though the resolved-path side now has a real
+  header, `X-WebShell-Resolved-Path`, per `runtime.md` §6.6.5). The
+  **human-readable naming layer** over SDT ordinals is *not* in this list: it is
+  normative in `runtime.md` §6.6 (the `c` file) and should be taught as settled
+  behavior, distinct from `sdt name`. Relative-link resolution under a *pipeline*
+  request is likewise implementation-defined and should be taught as a
+  discipline.
 - **Open spec questions to track.** Where v1 marks something implementation-
-  defined (OPTIONS/CORS, symlink policy, synthesized resources, directory-listing
+  defined (OPTIONS/CORS, whether `escape_policy` permits out-of-root escapes and
+  the resolution-depth budget — note the default `reject-escaping` → 403 is
+  itself normative per `runtime.md` §6.6.4 — synthesized resources, directory-listing
   format, base-URL for a pipeline request) or reserved (range arity, `input
   file`/`output file`, standardized `explain`), the book should say
   "implementation-defined / not yet specified" rather than document one server's
