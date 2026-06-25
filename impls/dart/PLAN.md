@@ -549,6 +549,7 @@ Key insights from Python reference (`impls/reference/wash/`) and Go port:
 | `encoding.yaml` | parser | Medium |
 | `case.yaml` | filesystem | Low |
 | `symlinks.yaml` | filesystem | Medium |
+| `names.yaml` | filesystem, parser, server | High — TODO (see `docs/name-resolution-propagation.md`) |
 | `security.yaml` | filesystem, parser | Medium |
 | `path-outside.yaml` | config | Low |
 | `synthesized.yaml` | server | Low (disabled) |

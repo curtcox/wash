@@ -11,3 +11,6 @@ Each subdirectory is one independent `wash` implementation. `reference/` is the 
 
 ## Boundary
 Implementations must not import or be imported by the harness. The harness treats yours exactly as it treats a third-party server.
+
+## In-flight propagation
+SDT name resolution (`runtime.md` §6.6) and the `symlink_policy` → `escape_policy` capability consolidation are implemented in `reference/` but not yet in `go/` or `dart/`. Because the `names.yaml` MUST vectors gate on `name_resolution: true`, those impls' conformance gates fail until they implement §6.6. See `docs/name-resolution-propagation.md` for the per-impl checklist and clause map.
