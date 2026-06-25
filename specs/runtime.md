@@ -246,6 +246,8 @@ An index file takes precedence over a directory listing when both are possible. 
 
 A directory may carry a naming file named c. Its entries map human-readable names to target paths, letting a name stand in for a path segment anywhere in a URL. Name resolution is part of mapping the URL path to a candidate filesystem path (§12.2 step 2): it extends literal mapping (§6.1) and applies to every HTTP method, not only GET. A root that contains no c files behaves exactly as if this section were absent.
 
+Name resolution addresses resources that exist. A request that resolves through a name reads, writes, or deletes the resolved target — so PUT to a path that resolves to an existing resource overwrites that target. A method that creates a new resource (PUT to a path that does not resolve) creates it at the literal request path; name resolution is not consulted to invent a creation location.
+
 #### 6.6.1 The c File
 
 A c file uses the metadata line grammar of pipeline_parsing.md §5.5: one entry per line, blank lines and # comment lines ignored, tokens separated by ASCII whitespace, last occurrence of a duplicate name winning. Each entry is a name followed by one or more whitespace-separated target paths; multiple targets are alternatives tried in order. A target is an ordinary path expression and may be root-relative (a leading /, resolved from the root), node-relative (resolved from the directory containing the c file, including .. segments), or a path that escapes the root (§6.6.4). A target may itself contain names (§6.6.3).

@@ -107,6 +107,28 @@
     body_not_contains: "outside-bytes"
     no_mutation: true
 
+- id: name-put-overwrite-through-name
+  clauses: [RT-6.6-all-methods, RT-13.2-mutating-methods]
+  tier: MUST
+  root: names
+  requires_capability:
+    all:
+      - { path: name_resolution, equals: true }
+      - { path: writes_enabled, equals: true }
+  request:
+    method: PUT
+    target: "/greeting"
+    body_exact: "rewritten\n"
+  expect:
+    status: 200
+    mutation:
+      path: "0/a"
+      action: replaced
+      bytes: "rewritten\n"
+    when_writes_disabled:
+      status_any: [403, 405]
+      no_mutation: true
+
 - id: name-head-through-name
   clauses: [RT-6.6-resolve-scope, RT-9.5-head-from-get]
   tier: MUST

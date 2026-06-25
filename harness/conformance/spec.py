@@ -297,6 +297,13 @@ CLAUSE_REGISTRY: dict[str, Clause] = {
         "optional",
         "X-WebShell-Resolved-Path reports the final resolved path through name/symlink hops",
     ),
+    "RT-6.6-all-methods": Clause(
+        "RT-6.6-all-methods",
+        "runtime §6.6",
+        "MUST",
+        "name resolution applies to all methods; PUT overwrites a resolved "
+        "existing target, a non-resolving path is created literally",
+    ),
     # pipeline §2
     "PP-2-parse-algo": Clause(
         "PP-2-parse-algo",

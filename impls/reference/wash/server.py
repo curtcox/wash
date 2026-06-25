@@ -31,8 +31,10 @@ from wash.filesystem import (
     listing_enabled,
     literal_path_parts_from_raw,
     load_index_names,
+    normalize_path_parts,
     put_file,
     read_file_bytes,
+    resolve_under_root,
     split_raw_target,
 )
 from wash.metadata import head_permitted
@@ -217,9 +219,28 @@ class WashRequestHandler(BaseHTTPRequestHandler):
 
         if method == "PUT":
             body = self._request_body()
+            root = self.server.config.root
+            # Names resolve for all methods (runtime.md §6.6): if the path already
+            # resolves through a name/symlink to an existing file, overwrite that
+            # target; a path that does not resolve is created literally.
+            normalized = normalize_path_parts(parts)
+            literal_target = root.joinpath(*normalized) if normalized else root
+            resolved = resolve_under_root(root, parts)
+            if (
+                resolved is not None
+                and resolved.is_file()
+                and resolved.resolve() != literal_target.resolve()
+            ):
+                try:
+                    resolved.write_bytes(body)
+                except OSError as exc:
+                    self._send_error(500, f"write failed: {exc}")
+                    return
+                self._send_response(200, b"", content_type="text/plain; charset=utf-8")
+                return
             try:
                 put_file(
-                    self.server.config.root,
+                    root,
                     parts,
                     body,
                     create_parents=True,
