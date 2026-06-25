@@ -486,7 +486,7 @@ Mirror `impls/reference/wash.capabilities.json` exactly (same as Go):
     "default": "application/octet-stream"
   },
   "options_cors": "implementation-defined",
-  "symlink_policy": "reject-escaping",
+  "escape_policy": "reject-escaping",
   "case_sensitive_lookup": true,
   "execution_metadata_headers": true,
   "error_body_formats": ["text/plain", "application/json"],

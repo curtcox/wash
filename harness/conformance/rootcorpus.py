@@ -202,7 +202,7 @@ def materialize(
     if chosen and chosen != "sh":
         _substitute_interpreter(material_path, chosen)
 
-    if synthesize_symlinks and caps and caps.get("symlink_policy") != "unsupported":
+    if synthesize_symlinks and caps and caps.get("escape_policy") != "unsupported":
         if root_name == "symlinks":
             _synthesize_symlinks(material_path)
 

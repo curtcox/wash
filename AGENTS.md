@@ -13,6 +13,7 @@ Domain terms (corpus, root, vector, clause, tier, adapter, capability, materiali
 - `harness/shared/`: fixtures shared across roots — e.g. command dirs that live *outside* a served root (used by the `path-outside` vectors). Materialized as a sibling bundle so `../shared/bin` entries resolve. Test data, not app code.
 - `harness/scripts/rebuild_corpus.py`: destructive corpus rewrite helper; inspect diffs carefully after running.
 - `impls/`: one subdirectory per implementation. `impls/reference/` is the Python reference server (see `impls/reference/AGENTS.md`); additional language impls (bash, deno, go, groovy, java, lua, perl, ruby, rust, swift, …) are planned and slot in alongside it. Every impl is launched through its own `harness/adapters/*.toml`, never imported by the harness.
+- `tools/sdt/`: implementation-agnostic Sequential Directory Tree tooling. Currently the `sdt check` name-resolution linter (the static counterpart to runtime.md §6.6); stdlib-only, run via `make sdt-test` or `python -m sdt check <root>`.
 
 ## Setup
 ```bash

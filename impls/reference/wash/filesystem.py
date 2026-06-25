@@ -157,16 +157,17 @@ def _resolve_walk(
     base_scope: list[tuple[Path, dict[str, list[str]]]],
     parts: list[str],
     *,
-    symlink_policy: str,
-    case_sensitive: bool,
     escape_policy: str,
+    case_sensitive: bool,
     hops: list[int],
 ) -> Path | None:
     """Walk ``parts`` from ``base``, resolving names against the scope chain.
 
-    Returns the resolved path (which lies outside root only when reached via a
-    policy-permitted name target), or None when a segment or target is absent.
-    Raises NameLoopError, NameEscapeError, or SymlinkEscapeError mid-walk.
+    A single escape_policy governs symlink and name target escapes alike
+    (runtime.md §6.6.4): escapes are rejected unless the policy is ``follow``.
+    Returns the resolved path (outside root only under a permitted escape), or
+    None when a segment or target is absent. Raises NameLoopError,
+    NameEscapeError, or SymlinkEscapeError mid-walk.
     """
     current = base
     scope = list(base_scope)
@@ -182,11 +183,11 @@ def _resolve_walk(
                 if hops[0] > hops[1]:
                     raise NameLoopError("resolution depth exceeded")
                 target = child.resolve()
-                if symlink_policy == "reject-escaping" and not _is_under_root(
+                if escape_policy == "reject-escaping" and not _is_under_root(
                     root, target
                 ):
                     raise SymlinkEscapeError("symlink escapes root")
-                if symlink_policy == "unsupported":
+                if escape_policy == "unsupported":
                     raise SymlinkEscapeError("symlinks unsupported")
                 current = target
             else:
@@ -217,15 +218,14 @@ def _resolve_walk(
                     t_base,
                     _scope_for(root, t_base),
                     t_parts,
-                    symlink_policy=symlink_policy,
-                    case_sensitive=case_sensitive,
                     escape_policy=escape_policy,
+                    case_sensitive=case_sensitive,
                     hops=hops,
                 )
                 if node is None:
                     continue  # dangling alternative; try the next target
                 if not _is_under_root(root, node.resolve()):
-                    if escape_policy == "reject":
+                    if escape_policy != "follow":
                         raise NameEscapeError("name target escapes root")
                 resolved_node = node
                 break
@@ -242,9 +242,8 @@ def _walk_under_root(
     root: Path,
     rel_parts: list[str],
     *,
-    symlink_policy: str,
+    escape_policy: str = "reject-escaping",
     case_sensitive: bool,
-    escape_policy: str = "reject",
     max_depth: int = 40,
 ) -> Path | None:
     root = root.resolve()
@@ -254,9 +253,8 @@ def _walk_under_root(
         root,
         _scope_for(root, root),
         parts,
-        symlink_policy=symlink_policy,
-        case_sensitive=case_sensitive,
         escape_policy=escape_policy,
+        case_sensitive=case_sensitive,
         hops=[0, max_depth],
     )
     if resolved is None:
@@ -282,7 +280,7 @@ def resolve_under_root(
     root: Path,
     rel_parts: list[str],
     *,
-    symlink_policy: str = "reject-escaping",
+    escape_policy: str = "reject-escaping",
     case_sensitive: bool = True,
 ) -> Path | None:
     if not rel_parts:
@@ -291,7 +289,7 @@ def resolve_under_root(
         return _walk_under_root(
             root,
             rel_parts,
-            symlink_policy=symlink_policy,
+            escape_policy=escape_policy,
             case_sensitive=case_sensitive,
         )
     except (RootEscapeError, SymlinkEscapeError, PathSegmentError):
@@ -302,7 +300,7 @@ def try_exact_filesystem(
     root: Path,
     raw_segments: list[str],
     *,
-    symlink_policy: str = "reject-escaping",
+    escape_policy: str = "reject-escaping",
     case_sensitive: bool = True,
 ) -> FilesystemResource | None:
     if not raw_segments:
@@ -330,7 +328,7 @@ def try_exact_filesystem(
         resolved = _walk_under_root(
             root,
             decoded_parts,
-            symlink_policy=symlink_policy,
+            escape_policy=escape_policy,
             case_sensitive=case_sensitive,
         )
     except (RootEscapeError, SymlinkEscapeError):
@@ -459,7 +457,7 @@ def put_file(
     body: bytes,
     *,
     create_parents: bool = True,
-    symlink_policy: str = "reject-escaping",
+    escape_policy: str = "reject-escaping",
 ) -> Path:
     root = root.resolve()
     normalized = normalize_path_parts(rel_parts)
@@ -471,7 +469,7 @@ def put_file(
         current = current / part
         if current.exists() and current.is_symlink():
             resolved = current.resolve()
-            if symlink_policy == "reject-escaping" and not _is_under_root(
+            if escape_policy == "reject-escaping" and not _is_under_root(
                 root, resolved
             ):
                 raise SymlinkEscapeError("symlink escapes root")
@@ -481,7 +479,7 @@ def put_file(
     target = current / normalized[-1]
     if target.exists() and target.is_symlink():
         resolved = target.resolve()
-        if symlink_policy == "reject-escaping" and not _is_under_root(root, resolved):
+        if escape_policy == "reject-escaping" and not _is_under_root(root, resolved):
             raise SymlinkEscapeError("symlink escapes root")
     if not _is_under_root(root, target):
         raise RootEscapeError("path escapes root")
@@ -499,9 +497,9 @@ def delete_file(
     root: Path,
     rel_parts: list[str],
     *,
-    symlink_policy: str = "reject-escaping",
+    escape_policy: str = "reject-escaping",
 ) -> None:
-    resolved = resolve_under_root(root, rel_parts, symlink_policy=symlink_policy)
+    resolved = resolve_under_root(root, rel_parts, escape_policy=escape_policy)
     if resolved is None or not resolved.is_file():
         raise FileNotFoundError("file not found")
     resolved.unlink()
@@ -515,7 +513,7 @@ def implied_cat_bytes(
     root: Path,
     raw_segments: list[str],
     *,
-    symlink_policy: str = "reject-escaping",
+    escape_policy: str = "reject-escaping",
     case_sensitive: bool = True,
 ) -> bytes:
     if not raw_segments:
@@ -526,7 +524,7 @@ def implied_cat_bytes(
     resolved = resolve_under_root(
         root,
         fs_parts,
-        symlink_policy=symlink_policy,
+        escape_policy=escape_policy,
         case_sensitive=case_sensitive,
     )
     if resolved is None:

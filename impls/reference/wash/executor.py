@@ -248,7 +248,7 @@ def execute_pipeline(
     command_dirs: list[Path],
     exec_config: ExecConfig,
     body: bytes,
-    symlink_policy: str = "reject-escaping",
+    escape_policy: str = "reject-escaping",
     case_sensitive: bool = True,
 ) -> PipelineResult:
     stages = pipeline.stages
@@ -261,7 +261,7 @@ def execute_pipeline(
             stdin_data = implied_cat_bytes(
                 root,
                 pipeline.input_suffix_raw,
-                symlink_policy=symlink_policy,
+                escape_policy=escape_policy,
                 case_sensitive=case_sensitive,
             )
         except FileNotFoundError as exc:

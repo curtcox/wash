@@ -135,7 +135,7 @@ def render_compliance() -> str:
     names = list(impls)
     # Capability columns shared across all manifests, in a friendly order.
     cap_cols = [
-        ("symlink_policy", "Symlink policy"),
+        ("escape_policy", "Escape policy"),
         ("case_sensitive_lookup", "Case-sensitive"),
         ("writes_enabled", "Writes"),
         ("deletes_enabled", "Deletes"),

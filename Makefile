@@ -1,4 +1,4 @@
-.PHONY: install validate test unit lint format typecheck conformance coverage smoke-reference \
+.PHONY: install validate test unit lint format typecheck conformance coverage smoke-reference sdt-test \
 	build-go lint-go test-go conformance-go test-go-all \
 	build-dart lint-dart test-dart conformance-dart test-dart-all \
 	verify-site check-book
@@ -24,18 +24,22 @@ unit:
 	cd harness && $(PYTHON) -m pytest -q
 
 lint:
-	ruff check harness/conformance harness/scripts harness/tests impls/reference/wash
-	ruff format --check harness/conformance harness/scripts harness/tests impls/reference/wash
+	ruff check harness/conformance harness/scripts harness/tests impls/reference/wash tools/sdt/sdt tools/sdt/tests
+	ruff format --check harness/conformance harness/scripts harness/tests impls/reference/wash tools/sdt/sdt tools/sdt/tests
 
 format:
-	ruff format harness/conformance harness/scripts harness/tests impls/reference/wash
-	ruff check --fix harness/conformance harness/scripts harness/tests impls/reference/wash
+	ruff format harness/conformance harness/scripts harness/tests impls/reference/wash tools/sdt/sdt tools/sdt/tests
+	ruff check --fix harness/conformance harness/scripts harness/tests impls/reference/wash tools/sdt/sdt tools/sdt/tests
 
 typecheck:
 	cd harness && mypy conformance
 	cd impls/reference && mypy wash
+	cd tools/sdt && mypy sdt
 
-test: validate unit lint typecheck conformance
+sdt-test:
+	cd tools/sdt && $(PYTHON) -m pytest -q
+
+test: validate unit lint typecheck conformance sdt-test
 
 coverage:
 	wash-conformance coverage

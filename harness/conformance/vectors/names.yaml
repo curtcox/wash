@@ -100,7 +100,7 @@
   requires_capability:
     all:
       - { path: name_resolution, equals: true }
-      - { path: escape_policy, equals: reject }
+      - { path: escape_policy, equals: reject-escaping }
   request: { method: GET, target: "/escape" }
   expect:
     status: 403
@@ -138,6 +138,17 @@
   expect:
     head_of: name-resolve-basic
     status: 200
+
+- id: name-c-malformed-graceful
+  clauses: [RT-6.6-c-graceful]
+  tier: MUST
+  root: names
+  requires_capability: { path: name_resolution, equals: true }
+  request: { method: GET, target: "/2/a" }
+  expect:
+    status: 200
+    body_contains: "node-two"
+    no_mutation: true
 
 - id: name-provenance
   clauses: [RT-6.6-provenance]

@@ -264,7 +264,7 @@ behavior plus whatever the implementation has declared.
 
 The fields whose values are drawn from a fixed set are **closed enumerations** in
 `capabilities.schema.json`, so `validate-capabilities` rejects an unknown value
-rather than silently accepting it: `options_cors` ∈ {`implementation-defined`, `disabled`}; `symlink_policy` ∈
+rather than silently accepting it: `options_cors` ∈ {`implementation-defined`, `disabled`}; `escape_policy` ∈
 {`reject-escaping`, `follow`, `unsupported`}; `error_body_formats` entries are
 media-type strings drawn from {`text/plain`, `application/json`}. Free-form fields
 (`runtime_artifact_paths`) stay open for values, but not for shape or safety:
@@ -285,7 +285,7 @@ illustrative of the shape, and the schema must be authored to match in phase 1
   "origin_form": "http://127.0.0.1",
   "synthesized_resources": { "enabled": false, "fixtures": [] },
   "options_cors": "implementation-defined",
-  "symlink_policy": "reject-escaping",
+  "escape_policy": "reject-escaping",
   "case_sensitive_lookup": true,
   "execution_metadata_headers": true,
   "error_body_formats": ["text/plain", "application/json"],
@@ -498,7 +498,7 @@ they run anywhere the adapter's declared interpreters exist.
 | `mutation/` | PUT/DELETE/POST against plain files; validates literal targeting (§9.2/§9.4) and POST-to-plain→405 (§9.3). The MUST-level PUT/DELETE vectors target paths whose parent already exists, so the literal mutation is unambiguous; PUT into a missing parent is a separate vector gated on `put_creates_parents` (§4). Command-governed POST *write* semantics (e.g. the `sort output.txt/input.txt` redirection of §9.3) are command-specific, not defined by the core spec, so they are **not** a core MUST: this root ships a fixture command with declared write behavior and the vector asserts only consistency with that shipped command's contract (it exercises the impl's body/argv plumbing and method gating, not a portable redirection rule). **Run only on disposable copies.** |
 | `exec-rules/` | `exec` interpreter rules: exact basename match, glob match against relative path, first-match-wins, comment/blank handling, malformed rule→500, unresolved interpreter→500 (§7.2, §15.5). The positive rules participate in interpreter substitution like other command roots; malformed-rule fixtures are authored so their invalidity is independent of the interpreter token, and unresolved-interpreter fixtures use a reserved missing-interpreter sentinel that substitution deliberately leaves untouched. |
 | `encoding/` | Percent-encoding edge cases: `%5B%5D`, `%2F` in argv vs path, `%3F` literal `?` filename, `%26` literal-`&` command name, decoded NUL/`/` rejection in path segments. A decoded `/` or NUL is valid in an *argument* segment (§5.1, passed verbatim) but invalid in a *filesystem-lookup* segment (§9.1/§12.2); the spec marks the latter "invalid" without fixing a status, so those vectors assert `status_any: [400, 404]` rather than a single class. |
-| `symlinks/` | Symlink policy checks gated on `symlink_policy` and host support. The materializer synthesizes an in-root symlink and a harmless escaping symlink to a sibling bundle file. `reject-escaping` asserts the escaping target is not served (allowed rejection statuses only, and body must not contain the outside bytes); `follow` asserts the declared follow behavior against the synthesized fixtures; `unsupported` skips the symlink vectors. |
+| `symlinks/` | Symlink policy checks gated on `escape_policy` and host support. The materializer synthesizes an in-root symlink and a harmless escaping symlink to a sibling bundle file. `reject-escaping` asserts the escaping target is not served (allowed rejection statuses only, and body must not contain the outside bytes); `follow` asserts the declared follow behavior against the synthesized fixtures; `unsupported` skips the symlink vectors. |
 | `synthesized/` | Optional synthesized-resource checks. Runs only when the capability manifest declares concrete synthesized fixture paths (for example `/docs/index`) and their expected status/body/header behavior; validates command-parse-beats-synth, exact-file-beats-synth precedence, and 400-is-terminal-no-fallback. |
 | `path-outside/` | `env/path` pointing to `../shared/bin`; validates command dirs outside root work (§7.1) while literal file serving still rejects root escape (§12.2). Materialization copies this root as part of a fixture bundle that preserves the sibling `shared/bin` relationship. |
 | `case/` | Files differing only by case; behavior gated on `case_sensitive_lookup` declaration (audit R7, optional). The case-colliding pair is **synthesized at run time** and the vectors skip on a case-insensitive host (§6.6) — it is not checked in. |
@@ -687,7 +687,7 @@ fixture variants, not merely because it does not support POSIX `sh`.
   from implementation declarations.
 - Symlink fixtures for `symlinks/` are **not** checked in as real symlinks; they
   are synthesized into the materialized tree at run time and only when the
-  platform supports symlink creation and the manifest declares a `symlink_policy`.
+  platform supports symlink creation and the manifest declares a `escape_policy`.
   On platforms or implementations without symlink support the symlink vectors are
   skipped with a recorded reason. This keeps `validate-roots` (§6.5) free of
   checked-in symlinks while still exercising the behavior where it is meaningful.
@@ -894,7 +894,7 @@ manifest fields such as `writes_enabled`) or an object predicate:
 
 ```yaml
 requires_capability:
-  path: "symlink_policy"
+  path: "escape_policy"
   equals: "reject-escaping"
 ```
 

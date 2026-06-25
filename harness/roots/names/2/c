@@ -1,0 +1,4 @@
+# This "c" file is really just notes, not a naming table.
+# Every non-comment line below is non-naming (a single token), so the runtime
+# must ignore it gracefully (runtime.md §6.6.1) rather than fail.
+prose

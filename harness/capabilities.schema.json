@@ -9,7 +9,7 @@
     "origin_form",
     "synthesized_resources",
     "options_cors",
-    "symlink_policy",
+    "escape_policy",
     "case_sensitive_lookup",
     "execution_metadata_headers",
     "error_body_formats",
@@ -49,10 +49,12 @@
       "type": "string",
       "enum": ["implementation-defined", "disabled"]
     },
-    "symlink_policy": {
+    "escape_policy": {
       "type": "string",
       "enum": ["reject-escaping", "follow", "unsupported"]
     },
+    "name_resolution": { "type": "boolean" },
+    "name_resolution_max_depth": { "type": "integer", "minimum": 1 },
     "case_sensitive_lookup": { "type": "boolean" },
     "execution_metadata_headers": { "type": "boolean" },
     "error_body_formats": {

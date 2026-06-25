@@ -3,7 +3,7 @@
   tier: MUST
   root: symlinks
   requires_capability:
-    path: symlink_policy
+    path: escape_policy
     equals: reject-escaping
   request: { method: GET, target: "/link-escape" }
   expect:
@@ -16,7 +16,7 @@
   tier: optional
   root: symlinks
   requires_capability:
-    path: symlink_policy
+    path: escape_policy
     equals: follow
   request: { method: GET, target: "/link-ok" }
   expect:
@@ -28,7 +28,7 @@
   tier: optional
   root: symlinks
   requires_capability:
-    path: symlink_policy
+    path: escape_policy
     equals: follow
   request: { method: GET, target: "/link-to-file" }
   expect:

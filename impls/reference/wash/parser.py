@@ -177,7 +177,7 @@ def parse_request(
     *,
     command_dirs: list[Path] | None = None,
     case_sensitive: bool = True,
-    symlink_policy: str = "reject-escaping",
+    escape_policy: str = "reject-escaping",
     resolve_command_fn: Callable[..., Path | None] | None = None,
 ) -> ParseResult:
     if command_dirs is None:
@@ -195,7 +195,7 @@ def parse_request(
     fs = try_exact_filesystem(
         root,
         segments,
-        symlink_policy=symlink_policy,
+        escape_policy=escape_policy,
         case_sensitive=case_sensitive,
     )
     if fs is not None:
@@ -348,7 +348,7 @@ def parse_request(
                 resolved = resolve_under_root(
                     root,
                     fs_parts,
-                    symlink_policy=symlink_policy,
+                    escape_policy=escape_policy,
                     case_sensitive=case_sensitive,
                 )
                 if resolved is None:
