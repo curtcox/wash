@@ -3,9 +3,11 @@ package server
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/curtcox/wash/impls/go/internal/executor"
@@ -120,6 +122,10 @@ func (s *Server) dispatch(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleFilesystemGet(w http.ResponseWriter, r *http.Request, res *filesystem.Resource) {
 	omitBody := r.Method == http.MethodHead
+	var extraHeaders map[string]string
+	if res.ViaIndirection {
+		extraHeaders = map[string]string{"X-WebShell-Resolved-Path": res.Path}
+	}
 
 	if res.Kind == filesystem.KindFile {
 		data, err := s.fs.ReadFile(res.Path)
@@ -132,7 +138,7 @@ func (s *Server) handleFilesystemGet(w http.ResponseWriter, r *http.Request, res
 			s.sendError(w, r, http.StatusInternalServerError, err.Error(), nil)
 			return
 		}
-		s.sendResponse(w, r, http.StatusOK, data, ct, nil, omitBody)
+		s.sendResponse(w, r, http.StatusOK, data, ct, extraHeaders, omitBody)
 		return
 	}
 
@@ -154,7 +160,7 @@ func (s *Server) handleFilesystemGet(w http.ResponseWriter, r *http.Request, res
 			s.sendError(w, r, http.StatusInternalServerError, err.Error(), nil)
 			return
 		}
-		s.sendResponse(w, r, http.StatusOK, data, ct, nil, omitBody)
+		s.sendResponse(w, r, http.StatusOK, data, ct, extraHeaders, omitBody)
 		return
 	}
 
@@ -173,7 +179,7 @@ func (s *Server) handleFilesystemGet(w http.ResponseWriter, r *http.Request, res
 		s.sendError(w, r, http.StatusInternalServerError, fmt.Sprintf("listing failed: %v", err), nil)
 		return
 	}
-	s.sendResponse(w, r, http.StatusOK, listing, "text/plain; charset=utf-8", nil, omitBody)
+	s.sendResponse(w, r, http.StatusOK, listing, "text/plain; charset=utf-8", extraHeaders, omitBody)
 }
 
 func (s *Server) handleMutation(w http.ResponseWriter, r *http.Request, method, rawTarget string) {
@@ -186,6 +192,35 @@ func (s *Server) handleMutation(w http.ResponseWriter, r *http.Request, method, 
 
 	if method == http.MethodPut {
 		body := readBody(r)
+		resolved, resolveErr := s.fs.ResolveUnderRoot(parts, "reject-escaping", true)
+		if resolveErr != nil {
+			switch resolveErr.(type) {
+			case *filesystem.NameEscapeError, *filesystem.EscapeError, *filesystem.SymlinkEscapeError:
+				s.sendError(w, r, http.StatusForbidden, "path not permitted", nil)
+			case *filesystem.NameLoopError:
+				s.sendError(w, r, http.StatusLoopDetected, "name resolution loop detected", nil)
+			default:
+				s.sendError(w, r, http.StatusInternalServerError, fmt.Sprintf("path resolution failed: %v", resolveErr), nil)
+			}
+			return
+		}
+		if resolved != "" {
+			if info, statErr := os.Stat(resolved); statErr == nil && !info.IsDir() {
+				literalTarget := filepath.Join(append([]string{s.config.Root}, filesystem.NormalizePathParts(parts)...)...)
+				resolvedLiteral, literalErr := filepath.EvalSymlinks(literalTarget)
+				if literalErr != nil {
+					resolvedLiteral = filepath.Clean(literalTarget)
+				}
+				if filepath.Clean(resolved) != filepath.Clean(resolvedLiteral) {
+					if err := os.WriteFile(resolved, body, 0o644); err != nil {
+						s.sendError(w, r, http.StatusInternalServerError, fmt.Sprintf("write failed: %v", err), nil)
+						return
+					}
+					s.sendResponse(w, r, http.StatusOK, nil, "text/plain; charset=utf-8", nil, false)
+					return
+				}
+			}
+		}
 		if putErr := s.fs.PutFile(parts, body, true, "reject-escaping"); putErr != nil {
 			switch putErr.(type) {
 			case *filesystem.EscapeError, *filesystem.SymlinkEscapeError:
@@ -202,8 +237,11 @@ func (s *Server) handleMutation(w http.ResponseWriter, r *http.Request, method, 
 	if method == http.MethodDelete {
 		if delErr := s.fs.DeleteFile(parts, "reject-escaping"); delErr != nil {
 			switch delErr.(type) {
-			case *filesystem.EscapeError, *filesystem.SymlinkEscapeError:
+			case *filesystem.EscapeError, *filesystem.SymlinkEscapeError, *filesystem.NameEscapeError:
 				s.sendError(w, r, http.StatusForbidden, "path not permitted", nil)
+				return
+			case *filesystem.NameLoopError:
+				s.sendError(w, r, http.StatusLoopDetected, "name resolution loop detected", nil)
 				return
 			}
 			if strings.Contains(delErr.Error(), "not found") || strings.Contains(delErr.Error(), "no such file") {
@@ -235,11 +273,21 @@ func (s *Server) handlePipeline(w http.ResponseWriter, r *http.Request, p *parse
 		var err error
 		stdinData, err = s.fs.ImpliedCatBytes(p.InputSuffixRaw, true, "reject-escaping")
 		if err != nil {
-			switch err.(type) {
-			case *filesystem.NotFoundError:
+			var notFoundErr *filesystem.NotFoundError
+			var isDirErr *filesystem.IsDirError
+			var nameEscapeErr *filesystem.NameEscapeError
+			var escapeErr *filesystem.EscapeError
+			var symlinkEscapeErr *filesystem.SymlinkEscapeError
+			var nameLoopErr *filesystem.NameLoopError
+			switch {
+			case errors.As(err, &notFoundErr):
 				s.sendError(w, r, http.StatusNotFound, err.Error(), nil)
-			case *filesystem.IsDirError:
+			case errors.As(err, &isDirErr):
 				s.sendError(w, r, http.StatusBadRequest, err.Error(), nil)
+			case errors.As(err, &nameEscapeErr), errors.As(err, &escapeErr), errors.As(err, &symlinkEscapeErr):
+				s.sendError(w, r, http.StatusForbidden, "path not permitted", nil)
+			case errors.As(err, &nameLoopErr):
+				s.sendError(w, r, http.StatusLoopDetected, "name resolution loop detected", nil)
 			default:
 				s.sendError(w, r, http.StatusInternalServerError, fmt.Sprintf("input suffix error: %v", err), nil)
 			}

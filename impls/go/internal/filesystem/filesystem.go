@@ -147,6 +147,16 @@ type SymlinkEscapeError struct{ msg string }
 
 func (e *SymlinkEscapeError) Error() string { return e.msg }
 
+// NameEscapeError is returned when a c-file name resolves outside the root.
+type NameEscapeError struct{ msg string }
+
+func (e *NameEscapeError) Error() string { return e.msg }
+
+// NameLoopError is returned when name/symlink resolution exceeds the depth budget.
+type NameLoopError struct{ msg string }
+
+func (e *NameLoopError) Error() string { return e.msg }
+
 // PathSegmentError is returned for invalid path segments.
 type PathSegmentError struct{ msg string }
 
@@ -162,9 +172,10 @@ const (
 
 // Resource represents a resolved filesystem resource.
 type Resource struct {
-	Kind    ResourceKind
-	Path    string // Absolute filesystem path
-	RelPath string // Relative to root (as posix)
+	Kind           ResourceKind
+	Path           string // Absolute filesystem path
+	RelPath        string // Relative to root (as posix)
+	ViaIndirection bool
 }
 
 // ResourceType is kept for backward compat with server.go.
@@ -235,44 +246,184 @@ func lookupChild(dir, name string, caseSensitive bool) (string, error) {
 	return "", os.ErrNotExist
 }
 
-// walkUnderRoot traverses rel_parts from root, respecting symlink policy.
-// Returns the resolved absolute path, or nil if not found.
+type nameScope struct {
+	dir   string
+	table map[string][]string
+}
+
+func loadNameTable(directory string) map[string][]string {
+	table := map[string][]string{}
+	cFile := filepath.Join(directory, "c")
+	info, err := os.Stat(cFile)
+	if err != nil || info.IsDir() {
+		return table
+	}
+	lines, err := envConfigLines(cFile)
+	if err != nil {
+		return table
+	}
+	for _, line := range lines {
+		tokens := strings.Fields(line)
+		if len(tokens) < 2 {
+			continue
+		}
+		table[tokens[0]] = tokens[1:]
+	}
+	return table
+}
+
+func scopeFor(root, node string) []nameScope {
+	realRoot, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		realRoot = filepath.Clean(root)
+	}
+	realNode, err := filepath.EvalSymlinks(node)
+	if err != nil {
+		realNode = filepath.Clean(node)
+	}
+	chain := []nameScope{{dir: realRoot, table: loadNameTable(realRoot)}}
+	rel, err := filepath.Rel(realRoot, realNode)
+	if err != nil || rel == "." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || rel == ".." {
+		return chain
+	}
+	current := realRoot
+	for _, part := range strings.Split(rel, string(filepath.Separator)) {
+		if part == "" {
+			continue
+		}
+		current = filepath.Join(current, part)
+		if info, err := os.Stat(current); err == nil && info.IsDir() {
+			chain = append(chain, nameScope{dir: current, table: loadNameTable(current)})
+		}
+	}
+	return chain
+}
+
+func normalizeNameTargetParts(parts []string) []string {
+	var stack []string
+	for _, p := range parts {
+		if p == "" || p == "." {
+			continue
+		}
+		if p == ".." {
+			if len(stack) > 0 && stack[len(stack)-1] != ".." {
+				stack = stack[:len(stack)-1]
+			} else {
+				stack = append(stack, p)
+			}
+			continue
+		}
+		stack = append(stack, p)
+	}
+	return stack
+}
+
+func resolveWalk(root, base string, baseScope []nameScope, parts []string, escapePolicy string, caseSensitive bool, hops *int, maxDepth int) (string, error) {
+	current := base
+	scope := append([]nameScope{}, baseScope...)
+	i := 0
+	for i < len(parts) {
+		info, err := os.Stat(current)
+		if err != nil || !info.IsDir() {
+			return "", nil
+		}
+		part := parts[i]
+		child, err := lookupChild(current, part, caseSensitive)
+		if err == nil {
+			linfo, lerr := os.Lstat(child)
+			if lerr != nil {
+				return "", nil
+			}
+			if linfo.Mode()&os.ModeSymlink != 0 {
+				(*hops)++
+				if *hops > maxDepth {
+					return "", &NameLoopError{"resolution depth exceeded"}
+				}
+				target, rerr := filepath.EvalSymlinks(child)
+				if rerr != nil {
+					return "", nil
+				}
+				switch escapePolicy {
+				case "reject-escaping":
+					if !isUnderRoot(root, target) {
+						return "", &SymlinkEscapeError{"symlink escapes root"}
+					}
+				case "unsupported":
+					return "", &SymlinkEscapeError{"symlinks unsupported"}
+				}
+				current = target
+			} else {
+				current = child
+			}
+			i++
+			if info, statErr := os.Stat(current); statErr == nil && info.IsDir() {
+				scope = append(scope, nameScope{dir: current, table: loadNameTable(current)})
+			}
+			continue
+		}
+
+		resolved := ""
+		for level := len(scope) - 1; level >= 0; level-- {
+			targets, ok := scope[level].table[part]
+			if !ok {
+				continue
+			}
+			for _, tgt := range targets {
+				(*hops)++
+				if *hops > maxDepth {
+					return "", &NameLoopError{"name resolution depth exceeded"}
+				}
+				tBase := scope[level].dir
+				tRaw := tgt
+				if strings.HasPrefix(tgt, "/") {
+					tBase = root
+					tRaw = strings.TrimLeft(tgt, "/")
+				}
+				tParts := normalizeNameTargetParts(strings.Split(tRaw, "/"))
+				node, walkErr := resolveWalk(root, tBase, scopeFor(root, tBase), tParts, escapePolicy, caseSensitive, hops, maxDepth)
+				if walkErr != nil {
+					return "", walkErr
+				}
+				if node == "" {
+					continue
+				}
+				realNode, evalErr := filepath.EvalSymlinks(node)
+				if evalErr == nil && !isUnderRoot(root, realNode) && escapePolicy != "follow" {
+					return "", &NameEscapeError{"name target escapes root"}
+				}
+				resolved = node
+				break
+			}
+			break
+		}
+		if resolved == "" {
+			return "", nil
+		}
+		current = resolved
+		scope = scopeFor(root, current)
+		i++
+	}
+	return current, nil
+}
+
+// walkUnderRoot traverses rel_parts from root, respecting symlink and name policy.
+// Returns the resolved absolute path, or "" if not found.
 func walkUnderRoot(root string, relParts []string, symlinkPolicy string, caseSensitive bool) (string, error) {
 	realRoot, err := filepath.EvalSymlinks(root)
 	if err != nil {
 		return "", fmt.Errorf("cannot resolve root: %w", err)
 	}
-	current := realRoot
-	for _, part := range normalizeParts(relParts) {
-		info, err := os.Lstat(current)
-		if err != nil || !info.IsDir() {
-			return "", nil
-		}
-		next, err := lookupChild(current, part, caseSensitive)
-		if err != nil {
-			return "", nil
-		}
-		linfo, err := os.Lstat(next)
-		if err != nil {
-			return "", nil
-		}
-		if linfo.Mode()&os.ModeSymlink != 0 {
-			target, err := filepath.EvalSymlinks(next)
-			if err != nil {
-				return "", nil
-			}
-			switch symlinkPolicy {
-			case "reject-escaping":
-				if !isUnderRoot(realRoot, target) {
-					return "", &SymlinkEscapeError{"symlink escapes root"}
-				}
-			case "unsupported":
-				return "", &SymlinkEscapeError{"symlinks unsupported"}
-			}
-			current = target
-		} else {
-			current = next
-		}
+	hops := 0
+	current, err := resolveWalk(realRoot, realRoot, scopeFor(realRoot, realRoot), normalizeParts(relParts), symlinkPolicy, caseSensitive, &hops, 40)
+	if err != nil {
+		return "", err
+	}
+	if current == "" {
+		return "", nil
+	}
+	realCurrent, err := filepath.EvalSymlinks(current)
+	if err == nil {
+		current = realCurrent
 	}
 	if !isUnderRoot(realRoot, current) {
 		return "", &EscapeError{"path escapes root"}
@@ -287,14 +438,26 @@ func normalizeParts(parts []string) []string {
 			continue
 		}
 		if p == ".." {
-			if len(stack) > 0 {
+			if len(stack) > 0 && stack[len(stack)-1] != ".." {
 				stack = stack[:len(stack)-1]
+			} else {
+				stack = append(stack, p)
 			}
 			continue
 		}
 		stack = append(stack, p)
 	}
 	return stack
+}
+
+// NormalizePathParts normalizes request path parts for callers that need a literal target.
+func NormalizePathParts(parts []string) []string {
+	return normalizeParts(parts)
+}
+
+// ResolveUnderRoot resolves literal path parts with name/symlink handling.
+func (fs *FS) ResolveUnderRoot(relParts []string, symlinkPolicy string, caseSensitive bool) (string, error) {
+	return walkUnderRoot(fs.root, relParts, symlinkPolicy, caseSensitive)
 }
 
 // TryExactFilesystem checks if raw URL segments resolve to an exact filesystem resource.
@@ -356,11 +519,13 @@ func (fs *FS) TryExactFilesystem(rawSegments []string, caseSensitive bool, symli
 	if relPath == "." {
 		relPath = ""
 	}
+	requested := strings.Join(normalizeParts(decoded), string(filepath.Separator))
+	via := relPath != requested
 
 	if info.IsDir() {
-		return &Resource{Kind: KindDirectory, Path: resolved, RelPath: relPath}, nil
+		return &Resource{Kind: KindDirectory, Path: resolved, RelPath: relPath, ViaIndirection: via}, nil
 	}
-	return &Resource{Kind: KindFile, Path: resolved, RelPath: relPath}, nil
+	return &Resource{Kind: KindFile, Path: resolved, RelPath: relPath, ViaIndirection: via}, nil
 }
 
 // ReadFile reads the contents of a file.

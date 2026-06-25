@@ -4,6 +4,8 @@
   "synthesized_resources": { "enabled": false, "fixtures": [] },
   "options_cors": "implementation-defined",
   "escape_policy": "reject-escaping",
+  "name_resolution": true,
+  "name_resolution_max_depth": 40,
   "case_sensitive_lookup": true,
   "execution_metadata_headers": true,
   "error_body_formats": ["text/plain", "application/json"],

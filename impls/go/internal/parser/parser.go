@@ -282,6 +282,12 @@ func ParseRequest(
 	// Step 2: Check exact filesystem resource first.
 	res, err := fs.TryExactFilesystem(segments, caseSensitive, symlinkPolicy)
 	if err != nil {
+		switch err.(type) {
+		case *filesystem.NameEscapeError:
+			return nil, &ParseError{Message: "name target escapes root", Status: 403}
+		case *filesystem.NameLoopError:
+			return nil, &ParseError{Message: "name resolution loop detected", Status: 508}
+		}
 		return nil, parseErr(fmt.Sprintf("path error: %v", err))
 	}
 	if res != nil {
@@ -426,7 +432,27 @@ func ParseRequest(
 		if len(remaining) > 1 {
 			lastStage := stages[len(stages)-1]
 			if !lastStage.ArgvFromQuery && lastStage.Meta.Arity == 0 && lastStage.Meta.ParseMode == "normal" {
-				return nil, parseErr(fmt.Sprintf("metadata-free command %s cannot consume path argument segments", lastStage.Name))
+				fsParts := make([]string, 0, len(remaining))
+				for _, raw := range remaining {
+					decoded, decErr := PercentDecodeSegment(raw, true)
+					if decErr != nil {
+						return nil, parseErr(fmt.Sprintf("metadata-free command %s cannot consume path argument segments", lastStage.Name))
+					}
+					fsParts = append(fsParts, decoded)
+				}
+				resolved, resolveErr := fs.ResolveUnderRoot(fsParts, symlinkPolicy, caseSensitive)
+				if resolveErr != nil {
+					switch resolveErr.(type) {
+					case *filesystem.NameEscapeError:
+						return nil, &ParseError{Message: "name target escapes root", Status: 403}
+					case *filesystem.NameLoopError:
+						return nil, &ParseError{Message: "name resolution loop detected", Status: 508}
+					}
+					return nil, parseErr(fmt.Sprintf("metadata-free command %s cannot consume path argument segments", lastStage.Name))
+				}
+				if resolved == "" {
+					return nil, parseErr(fmt.Sprintf("metadata-free command %s cannot consume path argument segments", lastStage.Name))
+				}
 			}
 		}
 
