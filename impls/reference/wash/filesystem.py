@@ -48,11 +48,20 @@ class SymlinkEscapeError(Exception):
     pass
 
 
+class NameEscapeError(Exception):
+    """A c-file name resolved to a target outside the root under a reject policy."""
+
+
+class NameLoopError(Exception):
+    """Name/symlink resolution exceeded the shared depth budget (a cycle)."""
+
+
 @dataclass
 class FilesystemResource:
     kind: Literal["file", "directory"]
     path: Path
     rel_path: str
+    via_indirection: bool = False
 
 
 def split_raw_target(raw_target: str) -> list[str]:
@@ -101,33 +110,160 @@ def _is_under_root(root: Path, path: Path) -> bool:
     return path_s == root_s or path_s.startswith(root_s + os.sep)
 
 
+def load_name_table(directory: Path) -> dict[str, list[str]]:
+    """Parse a directory's ``c`` naming file (runtime.md §6.6.1).
+
+    Reuses the §5.5 metadata line grammar (comments/blanks ignored, whitespace
+    tokens, last-occurrence-wins). Each entry is ``name target...``. An absent,
+    empty, or malformed/non-naming file degrades to an empty table and never
+    raises, so an ordinary file named ``c`` cannot break a root.
+    """
+    c_file = directory / "c"
+    table: dict[str, list[str]] = {}
+    if not c_file.is_file():
+        return table
+    try:
+        lines = _env_config_lines(c_file)
+    except OSError:
+        return table
+    for line in lines:
+        tokens = line.split()
+        if len(tokens) < 2:
+            continue
+        table[tokens[0]] = tokens[1:]
+    return table
+
+
+def _scope_for(root: Path, node: Path) -> list[tuple[Path, dict[str, list[str]]]]:
+    """Scope chain of (dir, name-table) from root down to node, deepest last."""
+    root = root.resolve()
+    node = node.resolve()
+    chain: list[tuple[Path, dict[str, list[str]]]] = [(root, load_name_table(root))]
+    try:
+        rel = node.relative_to(root)
+    except ValueError:
+        return chain
+    current = root
+    for part in rel.parts:
+        current = current / part
+        if current.is_dir():
+            chain.append((current, load_name_table(current)))
+    return chain
+
+
+def _resolve_walk(
+    root: Path,
+    base: Path,
+    base_scope: list[tuple[Path, dict[str, list[str]]]],
+    parts: list[str],
+    *,
+    symlink_policy: str,
+    case_sensitive: bool,
+    escape_policy: str,
+    hops: list[int],
+) -> Path | None:
+    """Walk ``parts`` from ``base``, resolving names against the scope chain.
+
+    Returns the resolved path (which lies outside root only when reached via a
+    policy-permitted name target), or None when a segment or target is absent.
+    Raises NameLoopError, NameEscapeError, or SymlinkEscapeError mid-walk.
+    """
+    current = base
+    scope = list(base_scope)
+    i = 0
+    while i < len(parts):
+        if not current.is_dir():
+            return None
+        part = parts[i]
+        child = _lookup_child(current, part, case_sensitive=case_sensitive)
+        if child is not None:
+            if child.is_symlink():
+                hops[0] += 1
+                if hops[0] > hops[1]:
+                    raise NameLoopError("resolution depth exceeded")
+                target = child.resolve()
+                if symlink_policy == "reject-escaping" and not _is_under_root(
+                    root, target
+                ):
+                    raise SymlinkEscapeError("symlink escapes root")
+                if symlink_policy == "unsupported":
+                    raise SymlinkEscapeError("symlinks unsupported")
+                current = target
+            else:
+                current = child
+            i += 1
+            if current.is_dir():
+                scope.append((current, load_name_table(current)))
+            continue
+
+        # literal miss: resolve the segment as a name, nearest scope first
+        resolved_node: Path | None = None
+        for level in range(len(scope) - 1, -1, -1):
+            defining_dir, table = scope[level]
+            if part not in table:
+                continue
+            for tgt in table[part]:
+                hops[0] += 1
+                if hops[0] > hops[1]:
+                    raise NameLoopError("name resolution depth exceeded")
+                if tgt.startswith("/"):
+                    t_base = root
+                    t_parts = normalize_path_parts(tgt.lstrip("/").split("/"))
+                else:
+                    t_base = defining_dir
+                    t_parts = normalize_path_parts(tgt.split("/"))
+                node = _resolve_walk(
+                    root,
+                    t_base,
+                    _scope_for(root, t_base),
+                    t_parts,
+                    symlink_policy=symlink_policy,
+                    case_sensitive=case_sensitive,
+                    escape_policy=escape_policy,
+                    hops=hops,
+                )
+                if node is None:
+                    continue  # dangling alternative; try the next target
+                if not _is_under_root(root, node.resolve()):
+                    if escape_policy == "reject":
+                        raise NameEscapeError("name target escapes root")
+                resolved_node = node
+                break
+            break  # nearest matching name decides; do not search outer scopes
+        if resolved_node is None:
+            return None
+        current = resolved_node
+        scope = _scope_for(root, current)
+        i += 1
+    return current
+
+
 def _walk_under_root(
     root: Path,
     rel_parts: list[str],
     *,
     symlink_policy: str,
     case_sensitive: bool,
+    escape_policy: str = "reject",
+    max_depth: int = 40,
 ) -> Path | None:
     root = root.resolve()
-    current = root
-    for part in normalize_path_parts(rel_parts):
-        if not current.is_dir():
-            return None
-        next_path = _lookup_child(current, part, case_sensitive=case_sensitive)
-        if next_path is None:
-            return None
-        if next_path.is_symlink():
-            target = next_path.resolve()
-            if symlink_policy == "reject-escaping" and not _is_under_root(root, target):
-                raise SymlinkEscapeError("symlink escapes root")
-            if symlink_policy == "unsupported":
-                raise SymlinkEscapeError("symlinks unsupported")
-            current = target
-        else:
-            current = next_path
-    if not _is_under_root(root, current.resolve()):
+    parts = normalize_path_parts(rel_parts)
+    resolved = _resolve_walk(
+        root,
+        root,
+        _scope_for(root, root),
+        parts,
+        symlink_policy=symlink_policy,
+        case_sensitive=case_sensitive,
+        escape_policy=escape_policy,
+        hops=[0, max_depth],
+    )
+    if resolved is None:
+        return None
+    if not _is_under_root(root, resolved.resolve()):
         raise RootEscapeError("path escapes root")
-    return current
+    return resolved
 
 
 def _lookup_child(directory: Path, name: str, *, case_sensitive: bool) -> Path | None:
@@ -204,10 +340,12 @@ def try_exact_filesystem(
         return None
 
     rel = resolved.resolve().relative_to(root.resolve()).as_posix()
+    requested = "/".join(normalize_path_parts(decoded_parts))
+    via = rel != requested
     if resolved.is_dir():
-        return FilesystemResource("directory", resolved, rel)
+        return FilesystemResource("directory", resolved, rel, via_indirection=via)
     if resolved.is_file() or resolved.is_symlink():
-        return FilesystemResource("file", resolved, rel)
+        return FilesystemResource("file", resolved, rel, via_indirection=via)
     return None
 
 

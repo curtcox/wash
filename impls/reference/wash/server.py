@@ -19,6 +19,8 @@ from wash.executor import (
 )
 from wash.filesystem import (
     EnvConfigError,
+    NameEscapeError,
+    NameLoopError,
     RootEscapeError,
     SymlinkEscapeError,
     delete_file,
@@ -160,6 +162,11 @@ class WashRequestHandler(BaseHTTPRequestHandler):
         root = self.server.config.root
         path = resource.resource.path
         omit_body = self.command == "HEAD"
+        prov: dict[str, str] | None = (
+            {"X-WebShell-Resolved-Path": str(path)}
+            if resource.resource.via_indirection
+            else None
+        )
         try:
             if resource.resource.kind == "file":
                 data = read_file_bytes(path)
@@ -167,6 +174,7 @@ class WashRequestHandler(BaseHTTPRequestHandler):
                     200,
                     data,
                     content_type=infer_mime(path, root),
+                    extra_headers=prov,
                     omit_body=omit_body,
                 )
                 return
@@ -178,6 +186,7 @@ class WashRequestHandler(BaseHTTPRequestHandler):
                     200,
                     data,
                     content_type=infer_mime(index, root),
+                    extra_headers=prov,
                     omit_body=omit_body,
                 )
                 return
@@ -194,6 +203,7 @@ class WashRequestHandler(BaseHTTPRequestHandler):
             200,
             listing,
             content_type="text/plain; charset=utf-8",
+            extra_headers=prov,
             omit_body=omit_body,
         )
 
@@ -322,6 +332,14 @@ class WashRequestHandler(BaseHTTPRequestHandler):
         )
 
     def _dispatch(self) -> None:
+        try:
+            self._dispatch_inner()
+        except NameEscapeError:
+            self._send_error(403, "name target escapes root")
+        except NameLoopError:
+            self._send_error(508, "name resolution loop detected")
+
+    def _dispatch_inner(self) -> None:
         raw_target = self._raw_target()
         method = self.command
         config = self.server.config

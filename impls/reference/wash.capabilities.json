@@ -5,7 +5,7 @@
   "options_cors": "implementation-defined",
   "symlink_policy": "reject-escaping",
   "escape_policy": "reject",
-  "name_resolution": false,
+  "name_resolution": true,
   "name_resolution_max_depth": 40,
   "case_sensitive_lookup": true,
   "execution_metadata_headers": true,

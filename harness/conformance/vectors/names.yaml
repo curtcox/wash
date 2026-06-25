@@ -1,14 +1,12 @@
 # SDT name resolution (runtime.md §6.6).
 #
-# STAGING NOTE: these vectors are tier `optional` and gated on the
-# `name_resolution` capability. The reference impl currently declares
-# `name_resolution: false`, so they SKIP. When an implementation implements
-# §6.6 and declares `name_resolution: true`, promote the MUST-intent vectors
-# below (all except name-provenance) to `tier: MUST` together with the flag.
+# Gated on the `name_resolution` capability: an implementation that does not
+# declare `name_resolution: true` reports these as UNTESTED (MUST) / SKIP. The
+# resolved-path provenance header is optional (RT-6.6-provenance).
 
 - id: name-resolve-basic
   clauses: [RT-6.6-resolve-scope]
-  tier: optional
+  tier: MUST
   root: names
   requires_capability: { path: name_resolution, equals: true }
   request: { method: GET, target: "/greeting" }
@@ -19,7 +17,7 @@
 
 - id: name-literal-shadows
   clauses: [RT-6.6-literal-precedence]
-  tier: optional
+  tier: MUST
   root: names
   requires_capability: { path: name_resolution, equals: true }
   request: { method: GET, target: "/report.txt" }
@@ -31,7 +29,7 @@
 
 - id: name-nearest-wins
   clauses: [RT-6.6-nearest-wins]
-  tier: optional
+  tier: MUST
   root: names
   requires_capability: { path: name_resolution, equals: true }
   request: { method: GET, target: "/0/greeting" }
@@ -43,7 +41,7 @@
 
 - id: name-jump-into-target
   clauses: [RT-6.6-jump-scope]
-  tier: optional
+  tier: MUST
   root: names
   requires_capability: { path: name_resolution, equals: true }
   request: { method: GET, target: "/zerodir/0/a" }
@@ -54,7 +52,7 @@
 
 - id: name-jump-scope-rebuild
   clauses: [RT-6.6-jump-scope, RT-6.6-nearest-wins]
-  tier: optional
+  tier: MUST
   root: names
   requires_capability: { path: name_resolution, equals: true }
   request: { method: GET, target: "/zerodir/greeting" }
@@ -66,7 +64,7 @@
 
 - id: name-chain
   clauses: [RT-6.6-chain]
-  tier: optional
+  tier: MUST
   root: names
   requires_capability: { path: name_resolution, equals: true }
   request: { method: GET, target: "/chain" }
@@ -77,7 +75,7 @@
 
 - id: name-loop-508
   clauses: [RT-6.6-loop-bound]
-  tier: optional
+  tier: MUST
   root: names
   requires_capability: { path: name_resolution, equals: true }
   request: { method: GET, target: "/loopa" }
@@ -87,7 +85,7 @@
 
 - id: name-dangling-404
   clauses: [RT-6.6-dangling]
-  tier: optional
+  tier: MUST
   root: names
   requires_capability: { path: name_resolution, equals: true }
   request: { method: GET, target: "/gone" }
@@ -97,7 +95,7 @@
 
 - id: name-escape-403
   clauses: [RT-6.6-escape-policy]
-  tier: optional
+  tier: MUST
   root: names
   requires_capability:
     all:
@@ -111,7 +109,7 @@
 
 - id: name-head-through-name
   clauses: [RT-6.6-resolve-scope, RT-9.5-head-from-get]
-  tier: optional
+  tier: MUST
   root: names
   requires_capability: { path: name_resolution, equals: true }
   request: { method: HEAD, target: "/greeting" }
