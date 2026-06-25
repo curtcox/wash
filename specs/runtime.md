@@ -242,6 +242,38 @@ When a request resolves to a directory, the behavior is:
 
 An index file takes precedence over a directory listing when both are possible. The format of a directory listing is implementation-defined.
 
+### 6.6 Name Resolution
+
+A directory may carry a naming file named c. Its entries map human-readable names to target paths, letting a name stand in for a path segment anywhere in a URL. Name resolution is part of mapping the URL path to a candidate filesystem path (§12.2 step 2): it extends literal mapping (§6.1) and applies to every HTTP method, not only GET. A root that contains no c files behaves exactly as if this section were absent.
+
+#### 6.6.1 The c File
+
+A c file uses the metadata line grammar of pipeline_parsing.md §5.5: one entry per line, blank lines and # comment lines ignored, tokens separated by ASCII whitespace, last occurrence of a duplicate name winning. Each entry is a name followed by one or more whitespace-separated target paths; multiple targets are alternatives tried in order. A target is an ordinary path expression and may be root-relative (a leading /, resolved from the root), node-relative (resolved from the directory containing the c file, including .. segments), or a path that escapes the root (§6.6.4). A target may itself contain names (§6.6.3).
+
+Because name resolution is universal, a c file that is absent, empty, or malformed must degrade gracefully: a c file is only consulted when it parses, and an unparseable or non-naming c file is ignored at runtime (and reported by lint), so an ordinary file happening to be named c can never break a root. A malformed c file does not return 500.
+
+#### 6.6.2 Resolution Algorithm
+
+The runtime walks the URL path under the root one segment at a time, carrying the current node and a scope chain: the c files of every directory from the root down to the current node, nearest (deepest) last. For each segment:
+
+1. If the segment is a literal child of the current node — an ordinary file or directory, including a symlink — that child wins and resolution continues into it. Literal children always shadow names; a name colliding with a real entry (including the reserved node files a, b, and c) is therefore inert.
+2. Otherwise the segment is looked up as a name in the scope chain, nearest definition first. For the first matching name, its target paths are tried in order: a dangling target (no such path) is skipped and the next alternative tried; the first target resolving to an existing path is taken. A target that exists but resolves outside the root is not skipped — it is subject to the escape policy (§6.6.4) and, when rejected, terminates the name with 403 rather than falling through.
+3. On a match, the current node jumps to the resolved target and the scope chain is rebuilt from the target's own ancestry. A resolved name therefore behaves exactly as if the URL had been written with the target path in its place, including the target's own scope. A name carries no precedence of its own: it simply yields a path, which then re-enters this same walk.
+
+If the fully resolved path denotes an existing filesystem resource, it ranks as an exact filesystem resource in the precedence ladder (§6.2): because resolution occurs during filesystem mapping, a name that resolves to a resource is served ahead of any command of the same name. If name lookup yields no resolvable target, mapping falls through to command parsing exactly as an ordinary missing path does (§6.4). A name that matches no entry, or whose every target is dangling, produces 404 Not Found.
+
+#### 6.6.3 Chaining and Loops
+
+A target may itself begin with, or contain, a name; such targets are resolved iteratively to a fixpoint, each hop resolved against the scope rebuilt at the previous hop (§6.6.2 step 3). Name hops and symlink hops share a single resolution-depth budget per request (implementation-defined, recommended 40, matching typical symlink loop limits). When the combined number of name and symlink hops for one request exceeds the budget — including any cycle — the runtime returns 508 Loop Detected rather than looping. Exhaustive static cycle detection across the combined name-and-symlink graph is a linting concern (a c file is inert at runtime until consulted), not a per-request runtime obligation.
+
+#### 6.6.4 Escapes and the Shared Escape Policy
+
+Whether a symlink or a name target that resolves outside the configured root is followed is governed by a single escape policy capability that applies to both mechanisms uniformly. The default policy rejects escapes: a name or symlink whose resolved target lies outside the root returns 403 Forbidden. (403 rather than 404 is deliberate: it signals that an out-of-root target exists but policy forbids serving it, and this diagnostic is preferred even though it reveals the target's existence.) When the policy permits escapes, the out-of-root resource is served and the resolved path is reported per §6.6.5. Escapes are not marked syntactically; enumerating which targets leave the root is a linting concern.
+
+#### 6.6.5 Resolved-Path Provenance
+
+When a request is served through one or more name or symlink hops, the runtime should report the final resolved path via the X-WebShell-Resolved-Path header (pipeline_parsing.md §11), so a client or auditor can see where a name resolved — important once a target may lie outside the root.
+
 ## 7. Directory Layout
 
 No directory layout is mandatory. A root may be empty.
@@ -695,7 +727,7 @@ Root selection is implementation-dependent and outside this specification.
 For each request, the runtime:
 
 1. Parses the raw request-target itself using ordinary URL syntax, decomposing it into per-segment paths and query strings. A per-command query starts at a raw ? in a segment and ends at the next raw / or the end of the request-target; literal /, ?, &, and = inside query values must be percent-encoded. The runtime must not rely on a stock URL library's single path/query split, which would treat everything after the first ? as one opaque query string (see §4.7 and pipeline_parsing.md §6).
-2. Maps the URL path to a candidate filesystem path and/or command expression. Raw path segments are split before percent-decoding; decoded / and NUL are invalid in ordinary filesystem path segments. Dot segments are normalized for filesystem lookup, and ordinary literal file serving rejects any path that escapes the configured root. Symlink escape behavior is implementation-defined; the default policy should reject symlinks that expose files outside the root for direct file serving.
+2. Maps the URL path to a candidate filesystem path and/or command expression. Raw path segments are split before percent-decoding; decoded / and NUL are invalid in ordinary filesystem path segments. Dot segments are normalized for filesystem lookup, and ordinary literal file serving rejects any path that escapes the configured root. Mapping includes name resolution: a segment with no literal child may resolve through a c naming file (§6.6). Symlink and name targets that escape the root are governed by a single shared escape policy; the default policy rejects escapes (§6.6.4) and exposes nothing outside the root for direct file serving.
 3. Resolves command segments left-to-right using the command search path.
 4. Uses command metadata and defaults to determine arity, input mode, parse mode, and output behavior.
 5. Evaluates the rightmost input resource or request body as needed.

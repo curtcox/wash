@@ -1,0 +1,12 @@
+# names root — root-scope name table (runtime.md §6.6)
+# name        target(s)
+greeting      /0/a
+node1         /1/a
+zerodir       /0
+chain         target_b
+target_b      node1
+loopa         loopb
+loopb         loopa
+gone          /nope/missing
+report.txt    /1/a
+escape        ../wash-outside-secret.txt

@@ -236,6 +236,67 @@ CLAUSE_REGISTRY: dict[str, Clause] = {
         "optional",
         "case sensitivity behavior consistent with declared capability",
     ),
+    # runtime §6.6 name resolution
+    "RT-6.6-resolve-scope": Clause(
+        "RT-6.6-resolve-scope",
+        "runtime §6.6.2",
+        "MUST",
+        "name with no literal child resolves via c file to its target path",
+    ),
+    "RT-6.6-literal-precedence": Clause(
+        "RT-6.6-literal-precedence",
+        "runtime §6.6.2",
+        "MUST",
+        "literal child shadows a same-named c entry",
+    ),
+    "RT-6.6-nearest-wins": Clause(
+        "RT-6.6-nearest-wins",
+        "runtime §6.6.2",
+        "MUST",
+        "nearest (deepest) c definition shadows an ancestor definition of the same name",
+    ),
+    "RT-6.6-jump-scope": Clause(
+        "RT-6.6-jump-scope",
+        "runtime §6.6.2",
+        "MUST",
+        "resolved name jumps the walk to its target and rebuilds scope from the target",
+    ),
+    "RT-6.6-chain": Clause(
+        "RT-6.6-chain",
+        "runtime §6.6.3",
+        "MUST",
+        "a target that is itself a name resolves iteratively to a fixpoint",
+    ),
+    "RT-6.6-loop-bound": Clause(
+        "RT-6.6-loop-bound",
+        "runtime §6.6.3",
+        "MUST",
+        "name+symlink hops share one depth budget; overflow or cycle → 508",
+    ),
+    "RT-6.6-dangling": Clause(
+        "RT-6.6-dangling",
+        "runtime §6.6.2",
+        "MUST",
+        "name matching no entry or with only dangling targets → 404",
+    ),
+    "RT-6.6-escape-policy": Clause(
+        "RT-6.6-escape-policy",
+        "runtime §6.6.4",
+        "MUST",
+        "name/symlink target outside root rejected by default escape policy → 403",
+    ),
+    "RT-6.6-c-graceful": Clause(
+        "RT-6.6-c-graceful",
+        "runtime §6.6.1",
+        "MUST",
+        "absent/empty/malformed c file is ignored at runtime; never 500",
+    ),
+    "RT-6.6-provenance": Clause(
+        "RT-6.6-provenance",
+        "runtime §6.6.5",
+        "optional",
+        "X-WebShell-Resolved-Path reports the final resolved path through name/symlink hops",
+    ),
     # pipeline §2
     "PP-2-parse-algo": Clause(
         "PP-2-parse-algo",

@@ -206,6 +206,9 @@ def materialize(
         if root_name == "symlinks":
             _synthesize_symlinks(material_path)
 
+    if root_name == "names":
+        _synthesize_names_escape(material_path)
+
     if (
         synthesize_case
         and caps
@@ -314,6 +317,15 @@ def _synthesize_symlinks(root: Path) -> None:
             link_file.symlink_to("plain-target.txt", target_is_directory=False)
         if not escape.exists():
             escape.symlink_to(outside)
+    except OSError:
+        pass
+
+
+def _synthesize_names_escape(root: Path) -> None:
+    """Write the out-of-root target for the names root's escape entry (not checked in)."""
+    outside = root.parent / "wash-outside-secret.txt"
+    try:
+        outside.write_text("outside-bytes", encoding="utf-8")
     except OSError:
         pass
 

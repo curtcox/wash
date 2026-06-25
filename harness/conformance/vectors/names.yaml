@@ -1,0 +1,134 @@
+# SDT name resolution (runtime.md §6.6).
+#
+# STAGING NOTE: these vectors are tier `optional` and gated on the
+# `name_resolution` capability. The reference impl currently declares
+# `name_resolution: false`, so they SKIP. When an implementation implements
+# §6.6 and declares `name_resolution: true`, promote the MUST-intent vectors
+# below (all except name-provenance) to `tier: MUST` together with the flag.
+
+- id: name-resolve-basic
+  clauses: [RT-6.6-resolve-scope]
+  tier: optional
+  root: names
+  requires_capability: { path: name_resolution, equals: true }
+  request: { method: GET, target: "/greeting" }
+  expect:
+    status: 200
+    body_contains: "root-zero"
+    no_mutation: true
+
+- id: name-literal-shadows
+  clauses: [RT-6.6-literal-precedence]
+  tier: optional
+  root: names
+  requires_capability: { path: name_resolution, equals: true }
+  request: { method: GET, target: "/report.txt" }
+  expect:
+    status: 200
+    body_contains: "literal-report"
+    body_not_contains: "node-one"
+    no_mutation: true
+
+- id: name-nearest-wins
+  clauses: [RT-6.6-nearest-wins]
+  tier: optional
+  root: names
+  requires_capability: { path: name_resolution, equals: true }
+  request: { method: GET, target: "/0/greeting" }
+  expect:
+    status: 200
+    body_contains: "deep-node"
+    body_not_contains: "root-zero"
+    no_mutation: true
+
+- id: name-jump-into-target
+  clauses: [RT-6.6-jump-scope]
+  tier: optional
+  root: names
+  requires_capability: { path: name_resolution, equals: true }
+  request: { method: GET, target: "/zerodir/0/a" }
+  expect:
+    status: 200
+    body_contains: "deep-node"
+    no_mutation: true
+
+- id: name-jump-scope-rebuild
+  clauses: [RT-6.6-jump-scope, RT-6.6-nearest-wins]
+  tier: optional
+  root: names
+  requires_capability: { path: name_resolution, equals: true }
+  request: { method: GET, target: "/zerodir/greeting" }
+  expect:
+    status: 200
+    body_contains: "deep-node"
+    body_not_contains: "root-zero"
+    no_mutation: true
+
+- id: name-chain
+  clauses: [RT-6.6-chain]
+  tier: optional
+  root: names
+  requires_capability: { path: name_resolution, equals: true }
+  request: { method: GET, target: "/chain" }
+  expect:
+    status: 200
+    body_contains: "node-one"
+    no_mutation: true
+
+- id: name-loop-508
+  clauses: [RT-6.6-loop-bound]
+  tier: optional
+  root: names
+  requires_capability: { path: name_resolution, equals: true }
+  request: { method: GET, target: "/loopa" }
+  expect:
+    status: 508
+    no_mutation: true
+
+- id: name-dangling-404
+  clauses: [RT-6.6-dangling]
+  tier: optional
+  root: names
+  requires_capability: { path: name_resolution, equals: true }
+  request: { method: GET, target: "/gone" }
+  expect:
+    status: 404
+    no_mutation: true
+
+- id: name-escape-403
+  clauses: [RT-6.6-escape-policy]
+  tier: optional
+  root: names
+  requires_capability:
+    all:
+      - { path: name_resolution, equals: true }
+      - { path: escape_policy, equals: reject }
+  request: { method: GET, target: "/escape" }
+  expect:
+    status: 403
+    body_not_contains: "outside-bytes"
+    no_mutation: true
+
+- id: name-head-through-name
+  clauses: [RT-6.6-resolve-scope, RT-9.5-head-from-get]
+  tier: optional
+  root: names
+  requires_capability: { path: name_resolution, equals: true }
+  request: { method: HEAD, target: "/greeting" }
+  expect:
+    head_of: name-resolve-basic
+    status: 200
+
+- id: name-provenance
+  clauses: [RT-6.6-provenance]
+  tier: optional
+  root: names
+  requires_capability:
+    all:
+      - { path: name_resolution, equals: true }
+      - { path: execution_metadata_headers, equals: true }
+  request: { method: GET, target: "/greeting" }
+  expect:
+    status: 200
+    header_present: ["X-WebShell-Resolved-Path"]
+    no_mutation: true

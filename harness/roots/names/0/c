@@ -1,0 +1,2 @@
+# subtree scope under /0 — shadows the root-scope `greeting`
+greeting      /0/0/a

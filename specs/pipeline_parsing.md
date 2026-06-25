@@ -471,9 +471,10 @@ a literal ? as part of a filesystem name, percent-encode it as %3F.
 
 For filesystem lookup, raw path segments are split before percent-decoding. Decoded / and NUL are
 invalid in ordinary filesystem path segments. Dot segments are normalized for filesystem lookup, and
-ordinary literal file serving must reject any path that escapes the configured root. Symlink escape
-behavior is implementation-defined; the default policy should reject symlinks that expose files
-outside the root for direct file serving.
+ordinary literal file serving must reject any path that escapes the configured root. A segment with no
+literal child may instead resolve through a c naming file (runtime.md §6.6). Symlink and name targets
+that escape the root are governed by a single shared escape policy; the default policy rejects escapes
+(runtime.md §6.6.4), returning 403 Forbidden rather than exposing files outside the root.
 
 Leading, trailing, and repeated raw / are collapsed before parsing, so an empty path segment is never
 a valid command or argument segment. A trailing slash is not significant: /dir/ and /dir resolve to the
@@ -635,6 +636,10 @@ Successful command responses may expose execution metadata through headers.
 These headers are suggested, not required. When a runtime does expose execution metadata via headers, it should use the following standardized names rather than inventing its own:
 
 text X-WebShell-Command: grep X-WebShell-Pipeline: cat file.txt | grep needle X-WebShell-Source: root/path/file.txt 
+
+When a request is served through one or more name or symlink hops (runtime.md §6.6), the runtime should also report the final resolved path:
+
+text X-WebShell-Resolved-Path: root/0/3/a 
 
 Implementations may also expose this information through an optional explain command, but the existence of explain is not required by this addendum.
 
@@ -810,7 +815,7 @@ The questions previously open in this section are resolved as follows:
 12. Metadata-free commands permit GET only and default to mutates false (§5.7).
 13. No suffix and no request body means stdin is closed and empty (§4).
 14. Multi-stage pipeline exit status is pipefail-like; the first failing stage in URL order (the most downstream stage) wins (§5.4, §10.3).
-15. Symlink escapes for direct file serving are implementation-defined; the default policy should reject them (§9.1).
+15. Symlink and name-target escapes for direct file serving are governed by a single shared escape policy; the default policy rejects them, returning 403 (§9.1, runtime.md §6.6.4).
 16. stderr field values: discard (default) and merge; any other value is malformed and returns 500 (§5.9).
 17. mime field: a single media type that sets the final stage's Content-Type; malformed values return 500 (§5.8).
 18. exit field grammar: whitespace-separated code=status pairs, code a non-negative integer or *, explicit code beating * (§5.4).
@@ -820,3 +825,7 @@ The questions previously open in this section are resolved as follows:
 22. Leading, trailing, and repeated / are collapsed; an empty segment is never a valid command or argument, and a trailing slash is not significant (§9.1).
 23. The implied cat is a runtime primitive, not resolved through PATH and carrying no metadata or method restriction (§4).
 24. The /& prefix is detected on the raw segment before percent-decoding the command name (§8.1).
+25. Name resolution is universal: any directory may carry a c naming file mapping names to target paths, consulted only when a segment has no literal child, and applying to all HTTP methods (runtime.md §6.6). A root with no c files is unaffected.
+26. The c file reuses the §5.5 metadata line grammar; an absent, empty, or malformed c file degrades gracefully — it is ignored at runtime (and reported by lint), never returning 500 (runtime.md §6.6.1).
+27. Literal children shadow names; a resolved name jumps the walk to its target and rebuilds scope from the target's ancestry; targets may chain through further names. Name and symlink hops share one per-request depth budget (recommended 40); overflow or a cycle returns 508 Loop Detected (runtime.md §6.6.2, §6.6.3).
+28. Name and symlink escapes share one escape policy, rejecting escapes by default with 403 Forbidden; the resolved path is reported via X-WebShell-Resolved-Path (runtime.md §6.6.4, §6.6.5, §11).
