@@ -1,0 +1,63 @@
+#!/usr/bin/env python3
+"""Install the wash UI bundle into a wash root."""
+
+from __future__ import annotations
+
+import shutil
+import sys
+from pathlib import Path
+
+
+def main(argv: list[str]) -> int:
+    if len(argv) != 2:
+        print("usage: wash-ui-install <target-root>", file=sys.stderr)
+        return 2
+    source_root = Path(__file__).resolve().parents[1]
+    target_root = Path(argv[1]).resolve()
+    if not target_root.is_dir():
+        print(f"not a directory: {target_root}", file=sys.stderr)
+        return 2
+
+    manifest = [
+        line.strip()
+        for line in (source_root / "ui" / ".ui-manifest").read_text().splitlines()
+        if line.strip()
+    ]
+    conflicts = []
+    for rel in manifest:
+        if rel in {"env/path", "exec"}:
+            continue
+        src = source_root / rel
+        dst = target_root / rel
+        if dst.exists() and src.is_file() and dst.read_bytes() != src.read_bytes():
+            conflicts.append(rel)
+    if conflicts:
+        print("conflicts:", file=sys.stderr)
+        for rel in conflicts:
+            print(f"  {rel}", file=sys.stderr)
+        return 1
+
+    for rel in manifest:
+        src = source_root / rel
+        dst = target_root / rel
+        if rel == "env/path":
+            merge_line(dst, "bin")
+        elif rel == "exec":
+            merge_line(dst, "* python3")
+        elif src.is_file():
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(src, dst)
+    print(f"installed wash UI into {target_root}")
+    return 0
+
+
+def merge_line(path: Path, line: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    lines = path.read_text(encoding="utf-8").splitlines() if path.is_file() else []
+    if line not in [item.strip() for item in lines]:
+        lines.append(line)
+        path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv))

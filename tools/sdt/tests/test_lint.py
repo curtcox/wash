@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from sdt.lint import has_errors, lint_tree
+from sdt.write import add_node, next_ordinal
 
 
 def _codes(findings: list) -> set[str]:
@@ -92,3 +93,21 @@ def test_corpus_names_root_findings() -> None:
     assert "dangling-target" in codes
     assert "escape-target" in codes
     assert has_errors(findings)
+
+
+def test_next_ordinal_ignores_non_numeric_children(tmp_path: Path) -> None:
+    _write(tmp_path, "0/a", "zero\n")
+    _write(tmp_path, "10/a", "ten\n")
+    _write(tmp_path, "notes/a", "notes\n")
+
+    assert next_ordinal(tmp_path) == "11"
+
+
+def test_add_node_writes_body_and_provenance(tmp_path: Path) -> None:
+    created = add_node(tmp_path, b"hello\n", author="tester")
+
+    assert created.ordinal == "0"
+    assert (created.path / "a").read_bytes() == b"hello\n"
+    provenance = (created.path / "b").read_text(encoding="utf-8")
+    assert '"author": "tester"' in provenance
+    assert '"ordinal": "0"' in provenance

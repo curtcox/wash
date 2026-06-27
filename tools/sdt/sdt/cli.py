@@ -8,6 +8,7 @@ import sys
 from pathlib import Path
 
 from sdt.lint import Finding, has_errors, lint_tree
+from sdt.write import SdtWriteError, add_node, next_ordinal
 
 
 def _format_text(findings: list[Finding]) -> str:
@@ -26,7 +27,49 @@ def main(argv: list[str] | None = None) -> int:
     )
     check.add_argument("root", help="SDT root directory")
     check.add_argument("--json", action="store_true", help="emit findings as JSON")
+    name = sub.add_parser("name", help="print the next child ordinal for a node")
+    name.add_argument("parent", help="parent SDT directory")
+    add = sub.add_parser("add", help="atomically append a child node")
+    add.add_argument("parent", help="parent SDT directory")
+    add.add_argument(
+        "--body-file",
+        help="read the node body from this file instead of stdin",
+    )
+    add.add_argument("--author", help="optional author stored in b provenance")
+    add.add_argument("--json", action="store_true", help="emit created node as JSON")
     args = parser.parse_args(argv)
+
+    if args.command == "name":
+        parent = Path(args.parent)
+        try:
+            print(next_ordinal(parent))
+        except SdtWriteError as exc:
+            print(f"sdt: {exc}", file=sys.stderr)
+            return 2
+        return 0
+
+    if args.command == "add":
+        parent = Path(args.parent)
+        try:
+            body = (
+                Path(args.body_file).read_bytes()
+                if args.body_file is not None
+                else sys.stdin.buffer.read()
+            )
+            created = add_node(parent, body, author=args.author)
+        except (OSError, SdtWriteError) as exc:
+            print(f"sdt: {exc}", file=sys.stderr)
+            return 2
+        if args.json:
+            print(
+                json.dumps(
+                    {"path": str(created.path), "ordinal": created.ordinal},
+                    indent=2,
+                )
+            )
+        else:
+            print(created.path)
+        return 0
 
     root = Path(args.root)
     if not root.is_dir():

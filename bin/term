@@ -1,0 +1,15 @@
+#!/usr/bin/env python3
+import json
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+target = Path.cwd() / (sys.argv[1] if len(sys.argv) > 1 else ".")
+target = target if target.is_dir() else target.parent
+command = f"cd {target}"
+launched = False
+if os.environ.get("WASH_UI_LAUNCH_TERMINAL") == "1" and sys.platform == "darwin":
+    subprocess.Popen(["open", "-a", "Terminal", str(target)])
+    launched = True
+print(json.dumps({"launched": launched, "command": command, "message": command}))

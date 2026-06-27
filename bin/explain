@@ -1,0 +1,7 @@
+#!/usr/bin/env python3
+import json
+import sys
+
+target = sys.argv[1] if len(sys.argv) > 1 else ""
+segments = [part for part in target.split("/") if part]
+print(json.dumps({"target": target, "segments": segments, "note": "runtime explain is not standardized yet"}, indent=2))

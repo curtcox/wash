@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>wash</title>
+    <link rel="stylesheet" href="/ui/style.css">
+  </head>
+  <body>
+    <header class="topbar">
+      <a class="brand" href="/ui/">wash</a>
+      <form id="goto-form" class="goto">
+        <input id="goto-input" name="path" autocomplete="off" spellcheck="false" aria-label="Path">
+        <button type="submit">Go</button>
+      </form>
+      <nav class="actions" aria-label="View actions">
+        <a id="raw-link" href="/">Raw</a>
+        <button id="reload-button" type="button">Reload</button>
+        <button id="shell-button" type="button">Shell</button>
+      </nav>
+    </header>
+    <main class="layout">
+      <section class="viewer" aria-live="polite">
+        <div id="status" class="status"></div>
+        <div id="content" class="content"></div>
+      </section>
+      <aside class="side">
+        <section>
+          <h2>Root</h2>
+          <dl id="root-panel"></dl>
+        </section>
+        <section>
+          <h2>What Ran</h2>
+          <dl id="run-panel"></dl>
+        </section>
+        <section>
+          <h2>Names</h2>
+          <div id="names-panel" class="panel-list"></div>
+        </section>
+        <section>
+          <h2>Commands</h2>
+          <div id="commands-panel" class="panel-list"></div>
+        </section>
+      </aside>
+    </main>
+    <script type="module" src="/ui/app.js"></script>
+  </body>
+</html>

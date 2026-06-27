@@ -1,0 +1,33 @@
+#!/usr/bin/env python3
+import json
+from pathlib import Path
+
+root = Path.cwd()
+items = []
+for line in (root / "env" / "path").read_text(encoding="utf-8").splitlines():
+    entry = line.strip()
+    if not entry or entry.startswith("#"):
+        continue
+    directory = root / entry
+    if not directory.is_dir():
+        continue
+    for command in sorted(p for p in directory.iterdir() if p.is_file()):
+        if command.name == "wash-ui-install":
+            continue
+        meta = {}
+        meta_path = root / "env" / "meta" / command.name
+        if meta_path.is_file():
+            for raw in meta_path.read_text(encoding="utf-8").splitlines():
+                parts = raw.split()
+                if parts:
+                    meta[parts[0]] = parts[1:]
+        items.append(
+            {
+                "name": command.name,
+                "path": str(command),
+                "methods": meta.get("methods", ["GET"]),
+                "mutates": meta.get("mutates", ["false"]) == ["true"],
+                "mime": meta.get("mime", ["text/plain"])[0],
+            }
+        )
+print(json.dumps({"commands": items}, indent=2))

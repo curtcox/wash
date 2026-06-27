@@ -1,0 +1,4 @@
+#!/usr/bin/env python3
+from pathlib import Path
+
+print((Path.cwd() / "ui" / "index.html").read_text(encoding="utf-8"), end="")

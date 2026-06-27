@@ -1,0 +1,4 @@
+arity 2
+methods POST
+mutates true
+mime text/plain

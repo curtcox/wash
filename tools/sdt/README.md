@@ -25,6 +25,25 @@ python -m sdt check ../../harness/roots/names      # human-readable
 python -m sdt check <root> --json                   # machine-readable
 ```
 
+## `sdt name <parent>`
+
+Prints the next numeric child ordinal for an SDT node directory. Non-numeric
+children are ignored.
+
+```bash
+python -m sdt name ./notebook
+```
+
+## `sdt add <parent>`
+
+Atomically allocates the next numeric child directory, writes stdin to `a`, and
+writes JSON provenance to `b`. The directory creation uses exclusive creation, so
+concurrent appenders retry instead of colliding.
+
+```bash
+printf 'new turn\n' | python -m sdt add ./notebook --author "$USER"
+```
+
 ## Develop
 
 ```bash

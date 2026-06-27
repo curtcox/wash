@@ -148,7 +148,11 @@ class WashRequestHandler(BaseHTTPRequestHandler):
         body = self._error_body(status, message, extra=extra)
         self._send_response(status, body, content_type="text/plain; charset=utf-8")
 
-    def _pipeline_headers(self, result: PipelineResult) -> dict[str, str]:
+    def _pipeline_headers(
+        self,
+        result: PipelineResult,
+        parsed: PipelineParse | RawCommandParse,
+    ) -> dict[str, str]:
         headers: dict[str, str] = {}
         if result.final_command:
             headers["X-WebShell-Command"] = result.final_command
@@ -158,6 +162,14 @@ class WashRequestHandler(BaseHTTPRequestHandler):
             headers["X-WebShell-Source"] = str(
                 self.server.config.root / result.source_path
             )
+            parts = literal_path_parts_from_raw(
+                split_raw_target("/" + result.source_path)
+            )
+            resolved = resolve_under_root(self.server.config.root, parts)
+            if resolved is not None:
+                headers["X-WebShell-Resolved-Path"] = str(resolved)
+        elif isinstance(parsed, RawCommandParse):
+            headers["X-WebShell-Resolved-Path"] = str(parsed.stage.command_path)
         return headers
 
     def _handle_filesystem_get(self, resource: FilesystemParse) -> None:
@@ -348,7 +360,7 @@ class WashRequestHandler(BaseHTTPRequestHandler):
             200,
             result.stdout,
             content_type=content_type,
-            extra_headers=self._pipeline_headers(result),
+            extra_headers=self._pipeline_headers(result, parsed),
             omit_body=omit_body,
         )
 

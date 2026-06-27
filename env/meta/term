@@ -1,0 +1,4 @@
+arity *
+methods POST
+mutates true
+mime application/json

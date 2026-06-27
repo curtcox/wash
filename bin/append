@@ -1,0 +1,24 @@
+#!/usr/bin/env python3
+import json
+import os
+import sys
+import time
+from pathlib import Path
+
+parent = Path.cwd() / (sys.argv[1] if len(sys.argv) > 1 and sys.argv[1] else ".")
+body = sys.stdin.buffer.read()
+if not parent.is_dir():
+    print(json.dumps({"error": f"not a directory: {parent}"}))
+    raise SystemExit(2)
+while True:
+    ordinals = [int(p.name) for p in parent.iterdir() if p.is_dir() and p.name.isdecimal()]
+    ordinal = str((max(ordinals) + 1) if ordinals else 0)
+    node = parent / ordinal
+    try:
+        node.mkdir()
+        break
+    except FileExistsError:
+        continue
+(node / "a").write_bytes(body)
+(node / "b").write_text(json.dumps({"created": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "ordinal": ordinal}) + "\n", encoding="utf-8")
+print(json.dumps({"created": str(node.relative_to(Path.cwd())), "location": f"/{node.relative_to(Path.cwd()).as_posix()}"}))
