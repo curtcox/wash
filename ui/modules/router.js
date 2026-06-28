@@ -33,6 +33,28 @@ export function canonicalizeInput(input) {
   return prefix + segments.join("/");
 }
 
+export function currentViewMode() {
+  const hash = location.hash.replace(/^#/, "").trim();
+  if (hash === "files") {
+    return "files";
+  }
+  if (hash === "content") {
+    return "content";
+  }
+  return "auto";
+}
+
+export function viewModeHref(mode) {
+  const framed = framedPath(currentTarget()).split("#")[0];
+  if (mode === "files") {
+    return `${framed}#files`;
+  }
+  if (mode === "content") {
+    return `${framed}#content`;
+  }
+  return framed;
+}
+
 export function displayInput(input) {
   const raw = input.trim();
   if (!raw || raw === "/") {

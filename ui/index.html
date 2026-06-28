@@ -23,7 +23,15 @@
     </header>
     <main class="layout">
       <section class="viewer" aria-live="polite">
+        <nav class="view-tabs" aria-label="View mode">
+          <a id="thread-view-link" href="/ui/">Thread</a>
+          <a id="files-view-link" href="#files">Files</a>
+          <a id="content-view-link" href="#content">Content</a>
+        </nav>
         <div id="status" class="status"></div>
+        <div id="node-kind" class="node-kind"></div>
+        <div id="thread-panel" class="thread-panel" hidden></div>
+        <div id="files-panel" class="files-panel" hidden></div>
         <div id="content" class="content"></div>
       </section>
       <aside class="side">

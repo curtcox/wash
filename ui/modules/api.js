@@ -18,14 +18,58 @@ export async function fetchResource(target) {
       headers[headerLabel(key)] = value;
     }
   }
+  const blob = await response.blob();
+  const contentType = response.headers.get("content-type") || "";
+  let listing = null;
+  if (response.ok && contentType.startsWith("text/plain")) {
+    const text = await blob.text();
+    listing = parseListingText(text);
+    if (listing.length === 0 && text.trim() !== "") {
+      listing = null;
+    }
+    return {
+      blob: new Blob([text], { type: contentType }),
+      contentType,
+      headers,
+      listing,
+      ok: response.ok,
+      status: response.status,
+      url: response.url,
+    };
+  }
   return {
-    blob: await response.blob(),
-    contentType: response.headers.get("content-type") || "",
+    blob,
+    contentType,
     headers,
+    listing,
     ok: response.ok,
     status: response.status,
     url: response.url,
   };
+}
+
+export async function fetchListing(target) {
+  const response = await fetch(rawPath(target), {
+    headers: { Accept: "text/plain" },
+  });
+  if (!response.ok) {
+    throw new Error(`${target || "/"} returned ${response.status}`);
+  }
+  const text = await response.text();
+  return {
+    entries: parseListingText(text),
+    path: rawPath(target),
+  };
+}
+
+export async function fetchText(target) {
+  const response = await fetch(rawPath(target), {
+    headers: { Accept: "text/plain" },
+  });
+  if (!response.ok) {
+    throw new Error(`${target} returned ${response.status}`);
+  }
+  return response.text();
 }
 
 export async function getRootInfo() {
@@ -40,8 +84,9 @@ export async function getNames() {
   return getJson("/names");
 }
 
-export async function postTerm(target) {
-  const response = await fetch(`/term/${target.replace(/^\/+/, "")}`, { method: "POST" });
+export async function postTerm(directory) {
+  const trimmed = (directory || ".").replace(/^\/+/, "");
+  const response = await fetch(`/term/${trimmed}`, { method: "POST" });
   return response.json();
 }
 
@@ -55,4 +100,18 @@ async function getJson(path) {
 
 function headerLabel(key) {
   return key.replace("x-webshell-", "").replaceAll("-", " ");
+}
+
+function parseListingText(text) {
+  return text
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => {
+      const isDir = line.endsWith("/");
+      return {
+        isDir,
+        name: isDir ? line : line,
+      };
+    });
 }

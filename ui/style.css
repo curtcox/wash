@@ -120,6 +120,122 @@ button,
   margin-bottom: 12px;
 }
 
+.node-kind {
+  color: var(--muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  margin-bottom: 12px;
+}
+
+.view-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.view-tabs a {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--fg);
+  font-size: 13px;
+  padding: 6px 12px;
+  text-decoration: none;
+}
+
+.view-tabs a.active {
+  background: color-mix(in srgb, var(--accent) 16%, Canvas);
+  border-color: var(--accent);
+}
+
+.thread-panel,
+.files-panel {
+  margin-bottom: 16px;
+}
+
+.thread {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  display: grid;
+  gap: 14px;
+  padding: 14px;
+}
+
+.thread-header {
+  align-items: baseline;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  justify-content: space-between;
+}
+
+.thread-header h2,
+.files-header h2 {
+  font-size: 14px;
+  margin: 0;
+  text-transform: uppercase;
+}
+
+.thread-node {
+  border-left: 3px solid var(--line);
+  padding-left: 12px;
+}
+
+.thread-node.current {
+  border-left-color: var(--accent);
+}
+
+.thread-node h3 {
+  font-size: 15px;
+  margin: 0 0 8px;
+}
+
+.node-a {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  margin: 0 0 8px;
+  padding: 10px;
+  white-space: pre-wrap;
+}
+
+.node-b {
+  margin: 0 0 8px;
+}
+
+.thread-branches summary {
+  cursor: pointer;
+  margin-bottom: 8px;
+}
+
+.branch-list,
+.files-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.files-browser {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 14px;
+}
+
+.files-header {
+  align-items: baseline;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.files-header code,
+.files-empty,
+.files-error {
+  color: var(--muted);
+}
+
 .content {
   min-width: 0;
 }
