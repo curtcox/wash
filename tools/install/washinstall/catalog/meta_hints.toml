@@ -1,0 +1,21 @@
+# Runtime-metadata hints overlay for `wash install` (see specs/command_install.md §8.3).
+#
+# The catalog schema (tools.toml) carries no wash runtime-metadata fields, so any
+# *derivable* metadata an install writes to root/env/meta/<command> comes from
+# here. Keep this conservative: include ONLY fields that are true for the tool
+# regardless of how it is invoked in a pipeline — e.g. a default output media
+# type. Anything that depends on flags or arguments belongs in the URL/metadata
+# the user authors, not here.
+#
+# Each table is keyed by the command basename. Values use the field names from
+# pipeline_parsing.md §5.6: arity input output methods mime mutates parse-mode
+# stderr exit.
+
+[jq]
+mime = "application/json"
+
+[jo]
+mime = "application/json"
+
+[gron]
+mime = "text/plain"

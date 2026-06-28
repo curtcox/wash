@@ -6,7 +6,7 @@
 Domain terms (corpus, root, vector, clause, tier, adapter, capability, materialize) are defined in the glossary in `harness/AGENTS.md`.
 
 ## Where Code Lives
-- `specs/`: normative runtime and parsing specs plus the v1 open-question audit.
+- `specs/`: normative runtime and parsing specs plus the v1 open-question audit. `command_install.md` is the convention spec for installing host commands into a root (layered on runtime.md §6–§7).
 - `harness/conformance/`: Python conformance harness and CLI.
 - `harness/conformance/vectors/`: declarative YAML test vectors. Each vector should cite stable clause IDs from `harness/conformance/spec.py`.
 - `harness/roots/`: canonical fixture root corpus. Treat fixture contents as test data, not app code.
@@ -14,6 +14,7 @@ Domain terms (corpus, root, vector, clause, tier, adapter, capability, materiali
 - `harness/scripts/rebuild_corpus.py`: destructive corpus rewrite helper; inspect diffs carefully after running.
 - `impls/`: one subdirectory per implementation. `impls/reference/` is the Python reference server (see `impls/reference/AGENTS.md`); additional language impls (bash, deno, go, groovy, java, lua, perl, ruby, rust, swift, …) are planned and slot in alongside it. Every impl is launched through its own `harness/adapters/*.toml`, never imported by the harness.
 - `tools/sdt/`: implementation-agnostic Sequential Directory Tree tooling. Currently the `sdt check` name-resolution linter (the static counterpart to runtime.md §6.6); stdlib-only, run via `make sdt-test` or `python -m sdt check <root>`.
+- `tools/install/`: `wash install` — wires host-OS commands into a root's command dir as inspectable `sh` wrappers (see `specs/command_install.md`). Bundles the text-processing toolbox catalog (`washinstall/catalog/`, source of truth `tools.toml`) as its registry; treat the catalog as vendored data, not tool code. Stdlib-only, run via `make install-tool-test` or `python -m washinstall add <name> --root <root>`.
 
 ## Setup
 ```bash

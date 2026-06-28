@@ -1,0 +1,1321 @@
+# Text-processing pipeline toolbox — single source of truth.
+#
+# Generate derived files with:  python3 generate.py
+#
+# Schema (per [[tool]]):
+#   name           display/command name
+#   role           what the tool DOES (free-form but reused; primary picker axis)
+#   group          redundancy cluster — picker should choose AT MOST ONE per group
+#                  (omit or set unique when the tool has no real substitute)
+#   avail          one of: posix | pkg | heavy
+#                    posix = preinstalled on a stock mac/linux (or part of coreutils)
+#                    pkg   = single brew/apt install, no heavy deps
+#                    heavy = large install, runtime dep (JVM/python env), or model download
+#   baseline       true = include in the curated "install once" toolbox tier
+#   brew           homebrew formula (omit if not applicable / use the noted source)
+#   apt            debian/ubuntu package (omit if not packaged; note alt source)
+#   when           disambiguation / when-to-reach-for-it. Populated for ambiguous
+#                  redundancy groups; mechanical/empty elsewhere.
+
+# ───────────────────────── line search ─────────────────────────
+[[tool]]
+name = "grep"
+role = "line-search"
+group = "line-search"
+avail = "posix"
+baseline = true
+brew = "grep"
+apt = "grep"
+when = "Default line matcher. Use plain grep for portability/scripts. For interactive speed and gitignore-awareness over trees, reach for ripgrep."
+
+[[tool]]
+name = "ripgrep (rg)"
+role = "line-search"
+group = "line-search"
+avail = "pkg"
+baseline = true
+brew = "ripgrep"
+apt = "ripgrep"
+when = "Fastest recursive search; respects .gitignore; great defaults. First choice for searching codebases/dir trees. Has --replace for in-stream substitution."
+
+[[tool]]
+name = "the_silver_searcher (ag)"
+role = "line-search"
+group = "line-search"
+avail = "pkg"
+baseline = false
+brew = "the_silver_searcher"
+apt = "silversearcher-ag"
+when = "Predecessor to rg with similar ergonomics. Pick rg over ag for new setups; ag only if already standardized on it."
+
+[[tool]]
+name = "ack"
+role = "line-search"
+group = "line-search"
+avail = "pkg"
+baseline = false
+brew = "ack"
+apt = "ack"
+when = "Perl-based, highly portable (single script). Useful where you can't install a binary but have perl."
+
+[[tool]]
+name = "pcre2grep"
+role = "line-search"
+group = "line-search"
+avail = "pkg"
+baseline = false
+brew = "pcre2"
+apt = "pcre2-utils"
+when = "When you specifically need full PCRE2 regex semantics that BSD/GNU grep lack (lookbehind, recursion). Otherwise rg -P covers most of this."
+
+# ───────────────────────── stream edit ─────────────────────────
+[[tool]]
+name = "sed"
+role = "stream-edit"
+group = "stream-edit"
+avail = "posix"
+baseline = true
+brew = "gnu-sed"
+apt = "sed"
+when = "Line-oriented substitution/deletion. BSD (mac) vs GNU sed differ on -i and regex; install gnu-sed (gsed) on mac for portability. For multiline/structured edits, prefer perl or sd."
+
+[[tool]]
+name = "sd"
+role = "stream-edit"
+group = "stream-edit"
+avail = "pkg"
+baseline = false
+brew = "sd"
+apt = "# cargo install sd (not in apt)"
+when = "Modern find-and-replace with literal-string and sane regex syntax — no sed escaping pain. Best for straightforward s/// across files."
+
+[[tool]]
+name = "perl"
+role = "stream-edit"
+group = "inline-language"
+avail = "posix"
+baseline = true
+brew = "perl"
+apt = "perl"
+when = "Swiss-army for regex-heavy one-liners (-pe/-ne), multiline mode (-0777), and anything sed/awk can't express. Also a full inline language."
+
+[[tool]]
+name = "ed"
+role = "stream-edit"
+group = "stream-edit"
+avail = "posix"
+baseline = false
+brew = "ed"
+apt = "ed"
+when = "Scriptable line editor; useful for deterministic in-place edits in constrained environments. Rarely the first choice today."
+
+# ───────────────────────── field / column extract ─────────────────────────
+[[tool]]
+name = "awk (gawk)"
+role = "field-extract"
+group = "awk"
+avail = "posix"
+baseline = true
+brew = "gawk"
+apt = "gawk"
+when = "Field-based extraction and per-line compute. mac ships BSD awk; install gawk for GNU extensions. The workhorse for column math, group-by sums, reformatting."
+
+[[tool]]
+name = "frawk"
+role = "field-extract"
+group = "awk"
+avail = "pkg"
+baseline = false
+brew = "# cargo install frawk"
+apt = "# cargo install frawk"
+when = "awk-compatible but compiled/parallel — much faster on large files. Use when gawk is the bottleneck and the script is awk-expressible."
+
+[[tool]]
+name = "goawk"
+role = "field-extract"
+group = "awk"
+avail = "pkg"
+baseline = false
+brew = "# go install / release binary"
+apt = "# release binary"
+when = "Single-binary POSIX awk with CSV mode. Handy for embedding/CI where you want awk without a system dependency."
+
+[[tool]]
+name = "cut"
+role = "field-extract"
+group = "cut"
+avail = "posix"
+baseline = true
+brew = "coreutils"
+apt = "coreutils"
+when = "Simple byte/char/field slicing on a fixed delimiter. Fast and ubiquitous. For multi-char delimiters, regex fields, or reordering, use awk/choose/hck."
+
+[[tool]]
+name = "choose"
+role = "field-extract"
+group = "cut"
+avail = "pkg"
+baseline = false
+brew = "choose-rust"
+apt = "# cargo install choose"
+when = "cut/awk hybrid with negative indexing and ranges (e.g. choose 0 -1). Nicer ergonomics than cut for ad-hoc field picking."
+
+[[tool]]
+name = "hck"
+role = "field-extract"
+group = "cut"
+avail = "pkg"
+baseline = false
+brew = "# cargo install hck"
+apt = "# cargo install hck"
+when = "cut alternative with regex delimiters and field reordering, fast. Use when cut's single-char delimiter is too limiting."
+
+[[tool]]
+name = "teip"
+role = "field-extract"
+group = "cut"
+avail = "pkg"
+baseline = false
+brew = "teip"
+apt = "# cargo install teip"
+when = "Masks selected fields, pipes ONLY those through another command, then splices results back. Unique: edit part of a line with an external tool without touching the rest."
+
+[[tool]]
+name = "column"
+role = "field-extract"
+group = "align"
+avail = "posix"
+baseline = true
+brew = "util-linux"
+apt = "bsdmainutils"
+when = "Align columns for display (column -t). Presentation, not extraction."
+
+[[tool]]
+name = "paste"
+role = "field-extract"
+group = "merge-lines"
+avail = "posix"
+baseline = true
+brew = "coreutils"
+apt = "coreutils"
+when = "Merge lines side-by-side / join multiple files column-wise. Inverse-ish of cut."
+
+[[tool]]
+name = "join"
+role = "field-extract"
+group = "relational"
+avail = "posix"
+baseline = true
+brew = "coreutils"
+apt = "coreutils"
+when = "Relational join of two SORTED files on a key. For unsorted/complex joins prefer csvq/miller/sqlite3."
+
+# ───────────────────────── transform / translate chars ─────────────────────────
+[[tool]]
+name = "tr"
+role = "char-translate"
+group = "unique"
+avail = "posix"
+baseline = true
+brew = "coreutils"
+apt = "coreutils"
+when = "Translate/delete/squeeze characters. Casing, deleting char classes, squeezing whitespace."
+
+[[tool]]
+name = "rev"
+role = "char-translate"
+group = "unique"
+avail = "posix"
+baseline = false
+brew = "util-linux"
+apt = "util-linux"
+when = "Reverse characters per line."
+
+[[tool]]
+name = "expand / unexpand"
+role = "char-translate"
+group = "whitespace"
+avail = "posix"
+baseline = false
+brew = "coreutils"
+apt = "coreutils"
+when = "Convert between tabs and spaces."
+
+[[tool]]
+name = "fold / fmt / pr"
+role = "char-translate"
+group = "wrap"
+avail = "posix"
+baseline = false
+brew = "coreutils"
+apt = "coreutils"
+when = "Wrap/reflow/paginate plain text. fold = hard wrap at width; fmt = reflow paragraphs; pr = paginate with headers."
+
+# ───────────────────────── order / dedup / count ─────────────────────────
+[[tool]]
+name = "sort"
+role = "order"
+group = "unique"
+avail = "posix"
+baseline = true
+brew = "coreutils"
+apt = "coreutils"
+when = "Sort lines; numeric/version/key-field sort. Prerequisite for uniq and join."
+
+[[tool]]
+name = "uniq"
+role = "dedup"
+group = "dedup"
+avail = "posix"
+baseline = true
+brew = "coreutils"
+apt = "coreutils"
+when = "Collapse/count ADJACENT duplicates — pipe sorted input. For unsorted-dedup-preserving-order use awk '!seen[$0]++'."
+
+[[tool]]
+name = "wc"
+role = "count"
+group = "unique"
+avail = "posix"
+baseline = true
+brew = "coreutils"
+apt = "coreutils"
+when = "Count lines/words/bytes/chars."
+
+[[tool]]
+name = "tac"
+role = "order"
+group = "reverse-lines"
+avail = "posix"
+baseline = false
+brew = "coreutils"
+apt = "coreutils"
+when = "Reverse line order (cat backwards)."
+
+[[tool]]
+name = "shuf"
+role = "order"
+group = "unique"
+avail = "posix"
+baseline = false
+brew = "coreutils"
+apt = "coreutils"
+when = "Random permutation / sampling of lines."
+
+[[tool]]
+name = "nl"
+role = "transform"
+group = "number-lines"
+avail = "posix"
+baseline = false
+brew = "coreutils"
+apt = "coreutils"
+when = "Number lines with formatting control (vs cat -n)."
+
+[[tool]]
+name = "datamash"
+role = "aggregate"
+group = "unique"
+avail = "pkg"
+baseline = true
+brew = "datamash"
+apt = "datamash"
+when = "Group-by, sum/mean/median/stdev, crosstab, transpose on columnar text — without writing awk. First reach for quick stats on TSV."
+
+# ───────────────────────── stream plumbing ─────────────────────────
+[[tool]]
+name = "head / tail"
+role = "slice"
+group = "unique"
+avail = "posix"
+baseline = true
+brew = "coreutils"
+apt = "coreutils"
+when = "First/last N lines; tail -f to follow."
+
+[[tool]]
+name = "cat / tee"
+role = "plumbing"
+group = "unique"
+avail = "posix"
+baseline = true
+brew = "coreutils"
+apt = "coreutils"
+when = "Concatenate / fan-out a stream to file(s) and stdout."
+
+[[tool]]
+name = "split / csplit"
+role = "plumbing"
+group = "unique"
+avail = "posix"
+baseline = false
+brew = "coreutils"
+apt = "coreutils"
+when = "Chunk a stream/file by size, line count (split) or content pattern (csplit)."
+
+[[tool]]
+name = "sponge"
+role = "plumbing"
+group = "unique"
+avail = "pkg"
+baseline = true
+brew = "moreutils"
+apt = "moreutils"
+when = "Soak up stdin fully THEN write the file — lets you 'edit in place' via a pipe (cmd file | sponge file) without truncation races."
+
+[[tool]]
+name = "pv"
+role = "plumbing"
+group = "progress"
+avail = "pkg"
+baseline = false
+brew = "pv"
+apt = "pv"
+when = "Pipe-viewer: throughput/progress bar mid-pipeline."
+
+[[tool]]
+name = "stdbuf / unbuffer"
+role = "plumbing"
+group = "buffering"
+avail = "pkg"
+baseline = false
+brew = "coreutils"
+apt = "coreutils"
+when = "Force line/unbuffered I/O so streaming pipelines flush in real time. unbuffer (expect) when stdbuf doesn't take."
+
+[[tool]]
+name = "ts"
+role = "plumbing"
+group = "unique"
+avail = "pkg"
+baseline = true
+brew = "moreutils"
+apt = "moreutils"
+when = "Prefix each line with a timestamp. Quick timing/log annotation."
+
+[[tool]]
+name = "parallel (GNU parallel)"
+role = "dispatch"
+group = "dispatch"
+avail = "pkg"
+baseline = true
+brew = "parallel"
+apt = "parallel"
+when = "Run a command across many inputs concurrently with controlled jobs. More features than xargs -P (grouped output, retries, remote). For simple cases xargs suffices."
+
+[[tool]]
+name = "xargs"
+role = "dispatch"
+group = "dispatch"
+avail = "posix"
+baseline = true
+brew = "findutils"
+apt = "findutils"
+when = "Turn stdin into args for a command. Use -0 with find -print0. For concurrency/complex output, prefer GNU parallel."
+
+[[tool]]
+name = "moreutils (suite)"
+role = "plumbing"
+group = "unique"
+avail = "pkg"
+baseline = true
+brew = "moreutils"
+apt = "moreutils"
+when = "Bundle: sponge, ts, vipe (edit a pipe in $EDITOR), vidir, ifne, chronic (run quietly unless it fails), errno, combine, pee. Install once; many show up individually above."
+
+# ───────────────────────── find / dispatch ─────────────────────────
+[[tool]]
+name = "find"
+role = "find-files"
+group = "find"
+avail = "posix"
+baseline = true
+brew = "findutils"
+apt = "findutils"
+when = "Canonical file finder with predicates/-exec. BSD vs GNU differ. For fast interactive use + gitignore, prefer fd."
+
+[[tool]]
+name = "fd"
+role = "find-files"
+group = "find"
+avail = "pkg"
+baseline = true
+brew = "fd"
+apt = "fd-find"
+when = "Fast, ergonomic find: regex by default, gitignore-aware, parallel -x. apt installs binary as fdfind. First choice interactively."
+
+# ───────────────────────── diff / patch ─────────────────────────
+[[tool]]
+name = "diff"
+role = "diff"
+group = "diff"
+avail = "posix"
+baseline = true
+brew = "diffutils"
+apt = "diffutils"
+when = "Line diffs; unified/context. For word-level use wdiff/dwdiff; for prettier code diffs use delta."
+
+[[tool]]
+name = "delta"
+role = "diff"
+group = "diff-display"
+avail = "pkg"
+baseline = false
+brew = "git-delta"
+apt = "git-delta"
+when = "Syntax-highlighted pager for git/diff output. Display only — pair with diff/git."
+
+[[tool]]
+name = "wdiff / dwdiff"
+role = "diff"
+group = "diff-word"
+avail = "pkg"
+baseline = false
+brew = "wdiff"
+apt = "wdiff"
+when = "Word- or character-level diffs of prose. dwdiff lets you define delimiters."
+
+[[tool]]
+name = "patch"
+role = "patch"
+group = "unique"
+avail = "posix"
+baseline = true
+brew = "gpatch"
+apt = "patch"
+when = "Apply a unified/context diff to files."
+
+[[tool]]
+name = "comb (comm)"
+role = "diff"
+group = "set-compare"
+avail = "posix"
+baseline = false
+brew = "coreutils"
+apt = "coreutils"
+when = "Line-set comparison of two SORTED files (common / only-in-A / only-in-B). Set algebra, not edit diff."
+
+# ───────────────────────── JSON ─────────────────────────
+[[tool]]
+name = "jq"
+role = "json-query"
+group = "json-query"
+avail = "pkg"
+baseline = true
+brew = "jq"
+apt = "jq"
+when = "The standard JSON query/transform language. First choice for anything JSON. For huge streamed arrays consider jq --stream or a SQL engine."
+
+[[tool]]
+name = "gron"
+role = "json-query"
+group = "json-greppable"
+avail = "pkg"
+baseline = true
+brew = "gron"
+apt = "# go install / release"
+when = "Flattens JSON to discrete grep-able assignment lines, and ungron reverses it. Use when you want to grep/sed JSON paths or diff two JSON blobs line-wise."
+
+[[tool]]
+name = "fx"
+role = "json-query"
+group = "json-interactive"
+avail = "pkg"
+baseline = false
+brew = "fx"
+apt = "# npm i -g fx / release"
+when = "Interactive JSON viewer/explorer (TUI) plus JS expressions. Use to explore unknown JSON; jq for scripted pipelines."
+
+[[tool]]
+name = "jo"
+role = "json-build"
+group = "json-build"
+avail = "pkg"
+baseline = false
+brew = "jo"
+apt = "jo"
+when = "BUILD JSON from shell args/values (jo name=foo n=1). The inverse of jq — construct, don't query."
+
+[[tool]]
+name = "jc"
+role = "format-convert"
+group = "command-to-json"
+avail = "pkg"
+baseline = true
+brew = "jc"
+apt = "# pipx install jc"
+when = "Parses output of ~100 commands (ls, ps, dig, ifconfig, /etc files) and many formats INTO JSON so you can pipe to jq. The bridge from unstructured CLI output to structured."
+
+# ───────────────────────── YAML / TOML / multi-format ─────────────────────────
+[[tool]]
+name = "yq (mikefarah)"
+role = "yaml-query"
+group = "yaml-query"
+avail = "pkg"
+baseline = true
+brew = "yq"
+apt = "# snap/go (Go version); apt 'yq' may be the python one"
+when = "jq-syntax processor for YAML (also JSON/TOML/XML/props). Note TWO different tools named yq exist — this Go one vs a python jq-wrapper. Pin which you mean."
+
+[[tool]]
+name = "dasel"
+role = "multi-format-query"
+group = "multi-format"
+avail = "pkg"
+baseline = true
+brew = "dasel"
+apt = "# release binary"
+when = "One selector syntax across JSON/YAML/TOML/XML/CSV — query AND convert between them. Reach for it when a pipeline crosses formats and you don't want jq+yq+xq separately."
+
+[[tool]]
+name = "taplo"
+role = "toml-query"
+group = "toml"
+avail = "pkg"
+baseline = false
+brew = "taplo"
+apt = "# cargo install taplo-cli"
+when = "TOML format/lint/query. Use for validating/formatting TOML; dasel or tomlq for extraction."
+
+[[tool]]
+name = "crudini"
+role = "ini-query"
+group = "ini"
+avail = "pkg"
+baseline = false
+brew = "crudini"
+apt = "crudini"
+when = "Get/set/del values in INI/.conf files in place. Purpose-built for INI where dasel is generic."
+
+# ───────────────────────── XML / HTML ─────────────────────────
+[[tool]]
+name = "xmlstarlet"
+role = "xml-query"
+group = "xml"
+avail = "pkg"
+baseline = true
+brew = "xmlstarlet"
+apt = "xmlstarlet"
+when = "Full XPath/XSLT query+edit of XML. The 'jq for XML'. For quick CSS-selector scraping of HTML, prefer pup/htmlq."
+
+[[tool]]
+name = "xmllint"
+role = "xml-query"
+group = "xml"
+avail = "pkg"
+baseline = false
+brew = "libxml2"
+apt = "libxml2-utils"
+when = "Validate/format/XPath via libxml2. Great for --format pretty-printing and schema validation; xmlstarlet for richer editing."
+
+[[tool]]
+name = "pup"
+role = "html-query"
+group = "html"
+avail = "pkg"
+baseline = true
+brew = "pup"
+apt = "# go install / release"
+when = "CSS-selector extraction from HTML (like jq for HTML). First choice for scraping a page's elements."
+
+[[tool]]
+name = "htmlq"
+role = "html-query"
+group = "html"
+avail = "pkg"
+baseline = false
+brew = "htmlq"
+apt = "# cargo install htmlq"
+when = "Same niche as pup (CSS selectors over HTML), Rust. Pick one of pup/htmlq."
+
+[[tool]]
+name = "xidel"
+role = "html-query"
+group = "html"
+avail = "pkg"
+baseline = false
+brew = "xidel"
+apt = "# release binary"
+when = "XPath/CSS/XQuery over HTML+XML and can follow links/fetch. Heavier than pup; use for multi-page extraction logic."
+
+[[tool]]
+name = "html-xml-utils (hxselect)"
+role = "html-query"
+group = "html"
+avail = "pkg"
+baseline = false
+brew = "html-xml-utils"
+apt = "html-xml-utils"
+when = "Suite (hxselect/hxnormalize/...) for CSS-selecting HTML in pipelines. Alternative to pup where packaged."
+
+# ───────────────────────── CSV / TSV / tabular ─────────────────────────
+[[tool]]
+name = "miller (mlr)"
+role = "csv-query"
+group = "tabular-engine"
+avail = "pkg"
+baseline = true
+brew = "miller"
+apt = "miller"
+when = "awk-like but format-aware (CSV/TSV/JSON/pprint) with named fields, joins, stats, reshaping. The most general 'structured awk'. First reach for CSV transforms."
+
+[[tool]]
+name = "qsv"
+role = "csv-query"
+group = "tabular-fast"
+avail = "pkg"
+baseline = false
+brew = "qsv"
+apt = "# cargo install qsv"
+when = "Very fast CSV toolkit (descendant of xsv) — select/join/stats/dedup/sample/index on big files. Pick qsv over xsv for new use; performance-first."
+
+[[tool]]
+name = "xsv"
+role = "csv-query"
+group = "tabular-fast"
+avail = "pkg"
+baseline = false
+brew = "xsv"
+apt = "# cargo install xsv"
+when = "Original fast CSV swiss-army. qsv supersedes it; use xsv only if already present."
+
+[[tool]]
+name = "csvkit"
+role = "csv-query"
+group = "tabular-suite"
+avail = "pkg"
+baseline = false
+brew = "csvkit"
+apt = "# pipx install csvkit"
+when = "Python suite: csvcut/csvgrep/csvjson/csvsql/in2csv (Excel→CSV!). Reach for in2csv (format ingestion) and csvsql (SQL on CSV). Slower than qsv/mlr on big data."
+
+[[tool]]
+name = "csvq"
+role = "csv-query"
+group = "tabular-sql"
+avail = "pkg"
+baseline = false
+brew = "csvq"
+apt = "# go install / release"
+when = "Run SQL directly against CSV/TSV files (SELECT/JOIN/UPDATE). Use when the transform is naturally relational."
+
+[[tool]]
+name = "dsq"
+role = "csv-query"
+group = "tabular-sql"
+avail = "pkg"
+baseline = false
+brew = "dsq"
+apt = "# release binary"
+when = "SQL over CSV/JSON/Parquet/etc via an embedded engine. Like csvq but multi-format input. Pick one SQL-on-files tool."
+
+[[tool]]
+name = "q"
+role = "csv-query"
+group = "tabular-sql"
+avail = "pkg"
+baseline = false
+brew = "q"
+apt = "# pipx install q-text-as-data"
+when = "SQL on delimited text (python). Mature but slower; sqlite3 .import or dsq often preferable now."
+
+# ───────────────────────── SQL engines as text tools ─────────────────────────
+[[tool]]
+name = "sqlite3"
+role = "sql-engine"
+group = "sql-engine"
+avail = "pkg"
+baseline = true
+brew = "sqlite"
+apt = "sqlite3"
+when = "Ubiquitous SQL engine; .import CSV then query/join/aggregate, or :memory:. The dependable backbone for relational text crunching."
+
+[[tool]]
+name = "duckdb"
+role = "sql-engine"
+group = "sql-engine"
+avail = "pkg"
+baseline = true
+brew = "duckdb"
+apt = "# release binary / pipx install duckdb"
+when = "Columnar analytical SQL that reads CSV/Parquet/JSON directly and FAST, even files bigger than RAM. Best modern choice for analytical queries over data files."
+
+[[tool]]
+name = "octosql"
+role = "sql-engine"
+group = "sql-engine"
+avail = "pkg"
+baseline = false
+brew = "octosql"
+apt = "# release binary"
+when = "SQL JOINing across heterogeneous sources (CSV+JSON+postgres) in one query. Niche; duckdb covers most needs."
+
+# ───────────────────────── code / AST structural ─────────────────────────
+[[tool]]
+name = "ast-grep (sg)"
+role = "structural-code"
+group = "structural-code"
+avail = "pkg"
+baseline = true
+brew = "ast-grep"
+apt = "# cargo install ast-grep"
+when = "Search/lint/REWRITE source by syntax tree across many languages using code-shaped patterns. The 'jq for source code'. Use instead of regex when editing real code structure."
+
+[[tool]]
+name = "comby"
+role = "structural-code"
+group = "structural-code"
+avail = "pkg"
+baseline = false
+brew = "comby"
+apt = "# release binary"
+when = "Language-aware structural search/replace with hole patterns; good at matching balanced delimiters. Alternative to ast-grep; pick per language support."
+
+[[tool]]
+name = "srgn"
+role = "structural-code"
+group = "structural-code"
+avail = "pkg"
+baseline = false
+brew = "srgn"
+apt = "# cargo install srgn"
+when = "Scope edits by language constructs (comments, strings, function bodies) via tree-sitter, then apply text ops. Use to target 'only inside strings/comments'."
+
+[[tool]]
+name = "tree-sitter (+ tsq)"
+role = "structural-code"
+group = "structural-code"
+avail = "pkg"
+baseline = false
+brew = "tree-sitter"
+apt = "# cargo install / npm"
+when = "Low-level: parse code to a queryable syntax tree. Use when ast-grep/comby/srgn don't expose what you need and you'll write tree queries."
+
+# ───────────────────────── markdown / docs convert ─────────────────────────
+[[tool]]
+name = "pandoc"
+role = "format-convert"
+group = "doc-convert"
+avail = "pkg"
+baseline = true
+brew = "pandoc"
+apt = "pandoc"
+when = "Universal document converter: md/html/docx/rst/latex/epub ↔ each other. First reach for any doc-format translation."
+
+[[tool]]
+name = "mq"
+role = "markdown-query"
+group = "markdown"
+avail = "pkg"
+baseline = false
+brew = "# cargo install mq-cli"
+apt = "# cargo install mq-cli"
+when = "jq-like query language over Markdown structure (headings/lists/code blocks). Use to extract sections programmatically rather than regexing MD."
+
+[[tool]]
+name = "glow"
+role = "render"
+group = "markdown-render"
+avail = "pkg"
+baseline = false
+brew = "glow"
+apt = "# release binary"
+when = "Render Markdown nicely in the terminal. Display only."
+
+[[tool]]
+name = "html2text / html2markdown"
+role = "format-convert"
+group = "html-to-text"
+avail = "pkg"
+baseline = false
+brew = "html2text"
+apt = "html2text"
+when = "Strip HTML to readable text/markdown. For full doc conversion prefer pandoc; for scraping fields prefer pup."
+
+[[tool]]
+name = "lynx / w3m"
+role = "render"
+group = "html-to-text"
+avail = "pkg"
+baseline = false
+brew = "lynx"
+apt = "lynx"
+when = "Text browsers; -dump renders a page (incl. JS-free layout) to plain text. Good for getting article text out of HTML in a pipeline."
+
+# ───────────────────────── OCR / PDF / office extract ─────────────────────────
+[[tool]]
+name = "tesseract"
+role = "ocr"
+group = "ocr"
+avail = "heavy"
+baseline = false
+brew = "tesseract"
+apt = "tesseract-ocr"
+when = "Image → text OCR, many languages (install lang packs). Core OCR engine. For PDFs, wrap with ocrmypdf."
+
+[[tool]]
+name = "ocrmypdf"
+role = "ocr"
+group = "ocr"
+avail = "heavy"
+baseline = false
+brew = "ocrmypdf"
+apt = "ocrmypdf"
+when = "Adds a searchable text layer to scanned PDFs (uses tesseract). Use for PDF-in/PDF-out OCR; raw tesseract for images."
+
+[[tool]]
+name = "pdftotext (poppler)"
+role = "extract"
+group = "pdf-extract"
+avail = "pkg"
+baseline = true
+brew = "poppler"
+apt = "poppler-utils"
+when = "Extract the text layer from PDFs (also pdftohtml, pdfimages, pdfinfo in poppler). Use FIRST; only OCR if there's no text layer."
+
+[[tool]]
+name = "pdfgrep"
+role = "line-search"
+group = "pdf-extract"
+avail = "pkg"
+baseline = false
+brew = "pdfgrep"
+apt = "pdfgrep"
+when = "grep directly inside PDFs (with page numbers). Convenience over pdftotext|grep."
+
+[[tool]]
+name = "mutool (mupdf)"
+role = "extract"
+group = "pdf-extract"
+avail = "pkg"
+baseline = false
+brew = "mupdf-tools"
+apt = "mupdf-tools"
+when = "Fast PDF text/draw/extract and conversion. Alternative engine to poppler when output quality/structure differs."
+
+[[tool]]
+name = "catdoc / antiword / unrtf / docx2txt"
+role = "extract"
+group = "office-extract"
+avail = "pkg"
+baseline = false
+brew = "catdoc"
+apt = "catdoc"
+when = "Legacy office extraction: catdoc(.doc/.xls), antiword(.doc), unrtf(.rtf), docx2txt(.docx). For modern formats pandoc or libreoffice is more robust."
+
+[[tool]]
+name = "libreoffice (--headless)"
+role = "format-convert"
+group = "office-convert"
+avail = "heavy"
+baseline = false
+brew = "libreoffice"
+apt = "libreoffice"
+when = "Headless convert almost any office doc (doc/xls/ppt/odt) to pdf/txt/csv. Heavy but the most faithful office converter."
+
+# ───────────────────────── text ↔ diagram / image ─────────────────────────
+[[tool]]
+name = "graphviz (dot)"
+role = "text-to-diagram"
+group = "diagram"
+avail = "pkg"
+baseline = true
+brew = "graphviz"
+apt = "graphviz"
+when = "Render DOT graph text → SVG/PNG (dot/neato/fdp/circo/twopi by layout). The standard for graph/tree diagrams from text."
+
+[[tool]]
+name = "mermaid-cli (mmdc)"
+role = "text-to-diagram"
+group = "diagram"
+avail = "heavy"
+baseline = false
+brew = "# npm i -g @mermaid-js/mermaid-cli"
+apt = "# npm i -g @mermaid-js/mermaid-cli"
+when = "Render Mermaid markup (flowcharts/sequence/gantt) → SVG/PNG. Uses headless Chromium (heavy). Use for Mermaid specifically; graphviz for general graphs."
+
+[[tool]]
+name = "plantuml"
+role = "text-to-diagram"
+group = "diagram"
+avail = "heavy"
+baseline = false
+brew = "plantuml"
+apt = "plantuml"
+when = "UML/sequence/component diagrams from text (needs Java + graphviz). Use for UML; graphviz/mermaid otherwise."
+
+[[tool]]
+name = "graph-easy"
+role = "text-to-diagram"
+group = "diagram"
+avail = "pkg"
+baseline = false
+brew = "# cpan Graph::Easy"
+apt = "libgraph-easy-perl"
+when = "Convert between graph formats and render ASCII-art diagrams in the terminal. Unique: graph → ASCII without an image."
+
+[[tool]]
+name = "gnuplot"
+role = "text-to-plot"
+group = "plot"
+avail = "pkg"
+baseline = false
+brew = "gnuplot"
+apt = "gnuplot"
+when = "Plot numeric data → image or ASCII (set term dumb). Scriptable charts from columnar text."
+
+[[tool]]
+name = "termgraph"
+role = "text-to-plot"
+group = "plot"
+avail = "pkg"
+baseline = false
+brew = "# pipx install termgraph"
+apt = "# pipx install termgraph"
+when = "Quick bar/charts in the terminal from simple data. Lighter than gnuplot for eyeballing."
+
+[[tool]]
+name = "chafa"
+role = "image-to-text"
+group = "image-to-ascii"
+avail = "pkg"
+baseline = false
+brew = "chafa"
+apt = "chafa"
+when = "Render an image as ANSI/ASCII/sixel in the terminal. The inverse direction: image → terminal text art."
+
+[[tool]]
+name = "figlet / toilet"
+role = "text-to-image"
+group = "ascii-banner"
+avail = "pkg"
+baseline = false
+brew = "figlet"
+apt = "figlet"
+when = "Turn a short string into large ASCII-art banners."
+
+[[tool]]
+name = "qrencode"
+role = "text-to-image"
+group = "barcode"
+avail = "pkg"
+baseline = false
+brew = "qrencode"
+apt = "qrencode"
+when = "Encode text/URL → QR code (PNG or terminal). zbarimg decodes the reverse."
+
+# ───────────────────────── speech / audio ↔ text ─────────────────────────
+[[tool]]
+name = "whisper.cpp"
+role = "speech-to-text"
+group = "stt"
+avail = "heavy"
+baseline = false
+brew = "whisper-cpp"
+apt = "# build from source"
+when = "Local audio → transcript (needs a model download). Use for offline STT; openai-whisper (python) is the heavier reference impl."
+
+[[tool]]
+name = "espeak-ng / say"
+role = "text-to-speech"
+group = "tts"
+avail = "pkg"
+baseline = false
+brew = "espeak"
+apt = "espeak-ng"
+when = "text → speech. macOS has built-in `say`; espeak-ng is the cross-platform CLI."
+
+# ───────────────────────── encoding / binary ─────────────────────────
+[[tool]]
+name = "iconv"
+role = "encoding-convert"
+group = "charset"
+avail = "posix"
+baseline = true
+brew = "libiconv"
+apt = "libc-bin"
+when = "Convert character encodings (e.g. latin1→utf8). For format-guessing reencode use recode."
+
+[[tool]]
+name = "recode"
+role = "encoding-convert"
+group = "charset"
+avail = "pkg"
+baseline = false
+brew = "recode"
+apt = "recode"
+when = "Higher-level charset/surface recoding (incl. HTML entities). iconv for plain charset, recode for entity/surface tricks."
+
+[[tool]]
+name = "dos2unix / unix2dos"
+role = "encoding-convert"
+group = "line-endings"
+avail = "pkg"
+baseline = true
+brew = "dos2unix"
+apt = "dos2unix"
+when = "Fix CRLF/LF line endings. Quick and purpose-built vs a tr/sed incantation."
+
+[[tool]]
+name = "base64 / base32"
+role = "encoding-convert"
+group = "baseN"
+avail = "posix"
+baseline = false
+brew = "coreutils"
+apt = "coreutils"
+when = "Encode/decode binary↔text. base64 -d to decode."
+
+[[tool]]
+name = "xxd / hexdump / od"
+role = "binary-view"
+group = "hexdump"
+avail = "posix"
+baseline = true
+brew = "vim"
+apt = "xxd"
+when = "Hex view of bytes; xxd also does the reverse (xxd -r) to rebuild binary from hex. od/hexdump are POSIX variants."
+
+[[tool]]
+name = "hexyl"
+role = "binary-view"
+group = "hexdump"
+avail = "pkg"
+baseline = false
+brew = "hexyl"
+apt = "# cargo install hexyl"
+when = "Colored, readable hex viewer. Display nicety over xxd."
+
+[[tool]]
+name = "strings"
+role = "extract"
+group = "unique"
+avail = "posix"
+baseline = false
+brew = "binutils"
+apt = "binutils"
+when = "Pull printable strings out of binary files."
+
+# ───────────────────────── templating / expansion ─────────────────────────
+[[tool]]
+name = "envsubst"
+role = "template"
+group = "template"
+avail = "pkg"
+baseline = true
+brew = "gettext"
+apt = "gettext-base"
+when = "Substitute $VARS in a template from the environment. Simplest templating; for logic use m4/jinja."
+
+[[tool]]
+name = "m4"
+role = "template"
+group = "template"
+avail = "posix"
+baseline = false
+brew = "m4"
+apt = "m4"
+when = "Macro processor with conditionals/includes. Powerful but arcane; reach for it for real macro expansion."
+
+[[tool]]
+name = "jinja2 (j2cli / jinja2-cli)"
+role = "template"
+group = "template"
+avail = "pkg"
+baseline = false
+brew = "# pipx install jinja2-cli"
+apt = "# pipx install jinja2-cli"
+when = "Render Jinja templates with JSON/YAML data context. Best when you have structured data + loops/conditionals."
+
+# ───────────────────────── inline languages ─────────────────────────
+[[tool]]
+name = "python3"
+role = "inline-language"
+group = "inline-language"
+avail = "pkg"
+baseline = true
+brew = "python"
+apt = "python3"
+when = "When an algorithm is given in Python, or the transform exceeds awk/jq. python3 -c for one-liners; pyp/pyped for terser stdin handling."
+
+[[tool]]
+name = "pyp"
+role = "inline-language"
+group = "inline-language"
+avail = "pkg"
+baseline = false
+brew = "# pipx install pyp"
+apt = "# pipx install pyp"
+when = "Python one-liner runner with implicit line/stdin vars (like perl -pe but Python). Use to avoid boilerplate for quick Python filters."
+
+[[tool]]
+name = "ruby"
+role = "inline-language"
+group = "inline-language"
+avail = "posix"
+baseline = false
+brew = "ruby"
+apt = "ruby"
+when = "ruby -ne/-pe mirrors perl with friendlier syntax. Use when the supplied algorithm is Ruby, or you prefer it for text munging."
+
+[[tool]]
+name = "node / deno"
+role = "inline-language"
+group = "inline-language"
+avail = "pkg"
+baseline = false
+brew = "node"
+apt = "nodejs"
+when = "JS one-liners (node -e) or running supplied JS. deno for sandboxed single-file scripts with permissions."
+
+[[tool]]
+name = "php"
+role = "inline-language"
+group = "inline-language"
+avail = "pkg"
+baseline = false
+brew = "php"
+apt = "php-cli"
+when = "php -r / php -R for supplied PHP or its strong string functions."
+
+[[tool]]
+name = "nushell (nu)"
+role = "inline-language"
+group = "structured-shell"
+avail = "pkg"
+baseline = false
+brew = "nushell"
+apt = "# release / cargo install nu"
+when = "A shell whose pipelines carry STRUCTURED tables, not raw text — parses CSV/JSON natively and queries them fluently. Use as the environment when you want structured pipelines end-to-end."
+
+[[tool]]
+name = "R (Rscript)"
+role = "inline-language"
+group = "inline-language"
+avail = "heavy"
+baseline = false
+brew = "r"
+apt = "r-base"
+when = "When the supplied algorithm is R or the task is statistical. Rscript -e for one-liners."
+
+[[tool]]
+name = "bc / dc"
+role = "inline-language"
+group = "calc"
+avail = "posix"
+baseline = false
+brew = "bc"
+apt = "bc"
+when = "Arbitrary-precision arithmetic in pipelines. bc (infix), dc (RPN). For unit-aware math use units."
+
+[[tool]]
+name = "numfmt"
+role = "transform"
+group = "calc"
+avail = "posix"
+baseline = false
+brew = "coreutils"
+apt = "coreutils"
+when = "Format numbers to/from human units (1.5K ↔ 1500). Quick humanize without awk."
+
+# ───────────────────────── LLM-era ─────────────────────────
+[[tool]]
+name = "llm"
+role = "llm"
+group = "llm-cli"
+avail = "pkg"
+baseline = true
+brew = "llm"
+apt = "# pipx install llm"
+when = "Simon Willison's CLI: pipe text to a model, chain prompts, run via plugins (local or API), log to SQLite. The general 'LLM step' in a pipeline. Pairs with ttok/strip-tags/files-to-prompt."
+
+[[tool]]
+name = "ttok"
+role = "llm-support"
+group = "llm-tokens"
+avail = "pkg"
+baseline = false
+brew = "# pipx install ttok"
+apt = "# pipx install ttok"
+when = "Count or truncate text by TOKENS before sending to a model. Use to fit context windows in a pipe."
+
+[[tool]]
+name = "strip-tags"
+role = "llm-support"
+group = "html-to-text"
+avail = "pkg"
+baseline = false
+brew = "# pipx install strip-tags"
+apt = "# pipx install strip-tags"
+when = "Strip HTML to text (optionally keeping selected tags) to feed LLMs cheaply. From the same ecosystem as llm/ttok."
+
+[[tool]]
+name = "files-to-prompt"
+role = "llm-support"
+group = "llm-context"
+avail = "pkg"
+baseline = false
+brew = "# pipx install files-to-prompt"
+apt = "# pipx install files-to-prompt"
+when = "Concatenate a directory of files into one prompt-friendly blob (with paths). Use to feed a codebase/folder to an LLM."
+
+[[tool]]
+name = "ollama"
+role = "llm"
+group = "llm-runtime"
+avail = "heavy"
+baseline = false
+brew = "ollama"
+apt = "# install script / release"
+when = "Run local models; serves an API the `llm` CLI (or curl) can hit. Use for offline/local inference backing the llm step."
+
+[[tool]]
+name = "mods"
+role = "llm"
+group = "llm-cli"
+avail = "pkg"
+baseline = false
+brew = "mods"
+apt = "# release binary"
+when = "LLM-in-a-pipe CLI from Charm with nice TUI/markdown output. Alternative to llm; pick one as the default LLM step."
+
+[[tool]]
+name = "aichat"
+role = "llm"
+group = "llm-cli"
+avail = "pkg"
+baseline = false
+brew = "aichat"
+apt = "# cargo install aichat"
+when = "All-in-one LLM CLI/REPL with sessions and RAG. Another llm/mods alternative."
+
+[[tool]]
+name = "fabric"
+role = "llm"
+group = "llm-patterns"
+avail = "pkg"
+baseline = false
+brew = "fabric-ai"
+apt = "# go install / release"
+when = "Runs a library of curated prompt 'patterns' over piped input (summarize, extract_wisdom, etc.). Use for ready-made prompt recipes rather than hand-writing them."
+
+# ───────────────────────── spell / lint ─────────────────────────
+[[tool]]
+name = "aspell / hunspell"
+role = "spell"
+group = "spell"
+avail = "pkg"
+baseline = false
+brew = "aspell"
+apt = "aspell"
+when = "Spell-check text (hunspell has better dictionaries/morphology). Use -a/list mode in pipelines."
+
+[[tool]]
+name = "codespell"
+role = "spell"
+group = "spell-code"
+avail = "pkg"
+baseline = false
+brew = "codespell"
+apt = "codespell"
+when = "Find common misspellings in source code/comments. Tuned for code, low false positives."

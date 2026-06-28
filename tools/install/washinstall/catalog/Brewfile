@@ -1,0 +1,113 @@
+# Brewfile — generated from tools.toml. Run: brew bundle
+#
+# === Baseline (install once) ===
+brew "grep"  # grep
+brew "ripgrep"  # ripgrep (rg)
+brew "gnu-sed"  # sed
+brew "perl"  # perl
+brew "gawk"  # awk (gawk)
+brew "coreutils"  # cut
+brew "util-linux"  # column
+brew "datamash"  # datamash
+brew "moreutils"  # sponge
+brew "parallel"  # parallel (GNU parallel)
+brew "findutils"  # xargs
+brew "fd"  # fd
+brew "diffutils"  # diff
+brew "gpatch"  # patch
+brew "jq"  # jq
+brew "gron"  # gron
+brew "jc"  # jc
+brew "yq"  # yq (mikefarah)
+brew "dasel"  # dasel
+brew "xmlstarlet"  # xmlstarlet
+brew "pup"  # pup
+brew "miller"  # miller (mlr)
+brew "sqlite"  # sqlite3
+brew "duckdb"  # duckdb
+brew "ast-grep"  # ast-grep (sg)
+brew "pandoc"  # pandoc
+brew "poppler"  # pdftotext (poppler)
+brew "graphviz"  # graphviz (dot)
+brew "libiconv"  # iconv
+brew "dos2unix"  # dos2unix / unix2dos
+brew "vim"  # xxd / hexdump / od
+brew "gettext"  # envsubst
+brew "python"  # python3
+brew "llm"  # llm
+
+# === Full set (uncomment as needed) ===
+# brew "the_silver_searcher"  # the_silver_searcher (ag)
+# brew "ack"  # ack
+# brew "pcre2"  # pcre2grep
+# brew "sd"  # sd
+# brew "ed"  # ed
+# brew "choose-rust"  # choose
+# brew "teip"  # teip
+# brew "pv"  # pv
+# brew "git-delta"  # delta
+# brew "wdiff"  # wdiff / dwdiff
+# brew "fx"  # fx
+# brew "jo"  # jo
+# brew "taplo"  # taplo
+# brew "crudini"  # crudini
+# brew "libxml2"  # xmllint
+# brew "htmlq"  # htmlq
+# brew "xidel"  # xidel
+# brew "html-xml-utils"  # html-xml-utils (hxselect)
+# brew "qsv"  # qsv
+# brew "xsv"  # xsv
+# brew "csvkit"  # csvkit
+# brew "csvq"  # csvq
+# brew "dsq"  # dsq
+# brew "q"  # q
+# brew "octosql"  # octosql
+# brew "comby"  # comby
+# brew "srgn"  # srgn
+# brew "tree-sitter"  # tree-sitter (+ tsq)
+# brew "glow"  # glow
+# brew "html2text"  # html2text / html2markdown
+# brew "lynx"  # lynx / w3m
+# brew "tesseract"  # tesseract
+# brew "ocrmypdf"  # ocrmypdf
+# brew "pdfgrep"  # pdfgrep
+# brew "mupdf-tools"  # mutool (mupdf)
+# brew "catdoc"  # catdoc / antiword / unrtf / docx2txt
+# brew "libreoffice"  # libreoffice (--headless)
+# brew "plantuml"  # plantuml
+# brew "gnuplot"  # gnuplot
+# brew "chafa"  # chafa
+# brew "figlet"  # figlet / toilet
+# brew "qrencode"  # qrencode
+# brew "whisper-cpp"  # whisper.cpp
+# brew "espeak"  # espeak-ng / say
+# brew "recode"  # recode
+# brew "hexyl"  # hexyl
+# brew "binutils"  # strings
+# brew "m4"  # m4
+# brew "ruby"  # ruby
+# brew "node"  # node / deno
+# brew "php"  # php
+# brew "nushell"  # nushell (nu)
+# brew "r"  # R (Rscript)
+# brew "bc"  # bc / dc
+# brew "ollama"  # ollama
+# brew "mods"  # mods
+# brew "aichat"  # aichat
+# brew "fabric-ai"  # fabric
+# brew "aspell"  # aspell / hunspell
+# brew "codespell"  # codespell
+
+# === Not via brew formula — install another way ===
+# frawk: cargo install frawk
+# goawk: go install / release binary
+# hck: cargo install hck
+# mq: cargo install mq-cli
+# mermaid-cli (mmdc): npm i -g @mermaid-js/mermaid-cli
+# graph-easy: cpan Graph::Easy
+# termgraph: pipx install termgraph
+# jinja2 (j2cli / jinja2-cli): pipx install jinja2-cli
+# pyp: pipx install pyp
+# ttok: pipx install ttok
+# strip-tags: pipx install strip-tags
+# files-to-prompt: pipx install files-to-prompt

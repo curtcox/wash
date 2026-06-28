@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "wash-install"
+version = "0.1.0"
+description = "Install host-OS commands into a wash root"
+requires-python = ">=3.11"
+
+[project.scripts]
+wash-install = "washinstall.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["washinstall*"]
+
+[tool.setuptools.package-data]
+washinstall = ["catalog/*"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+
+[tool.ruff]
+# The catalog is vendored upstream data (the tools.toml toolbox and its generated
+# files), not tool code — exclude it from lint/format like the fixture corpus.
+extend-exclude = ["washinstall/catalog"]
+
+[tool.mypy]
+# Same rationale as the ruff exclude above: the vendored catalog is not tool code.
+exclude = "washinstall/catalog"

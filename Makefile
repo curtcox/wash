@@ -1,4 +1,4 @@
-.PHONY: install validate test unit lint format typecheck conformance coverage smoke-reference smoke-ui sdt-test ui-test \
+.PHONY: install validate test unit lint format typecheck conformance coverage smoke-reference smoke-ui sdt-test install-tool-test ui-test \
 	build-go lint-go test-go conformance-go test-go-all \
 	build-dart lint-dart test-dart conformance-dart test-dart-all \
 	verify-site check-book
@@ -24,20 +24,24 @@ unit:
 	cd harness && $(PYTHON) -m pytest -q
 
 lint:
-	ruff check harness/conformance harness/scripts harness/tests impls/reference/wash tools/sdt/sdt tools/sdt/tests
-	ruff format --check harness/conformance harness/scripts harness/tests impls/reference/wash tools/sdt/sdt tools/sdt/tests
+	ruff check harness/conformance harness/scripts harness/tests impls/reference/wash tools/sdt/sdt tools/sdt/tests tools/install/washinstall tools/install/tests
+	ruff format --check harness/conformance harness/scripts harness/tests impls/reference/wash tools/sdt/sdt tools/sdt/tests tools/install/washinstall tools/install/tests
 
 format:
-	ruff format harness/conformance harness/scripts harness/tests impls/reference/wash tools/sdt/sdt tools/sdt/tests
-	ruff check --fix harness/conformance harness/scripts harness/tests impls/reference/wash tools/sdt/sdt tools/sdt/tests
+	ruff format harness/conformance harness/scripts harness/tests impls/reference/wash tools/sdt/sdt tools/sdt/tests tools/install/washinstall tools/install/tests
+	ruff check --fix harness/conformance harness/scripts harness/tests impls/reference/wash tools/sdt/sdt tools/sdt/tests tools/install/washinstall tools/install/tests
 
 typecheck:
 	cd harness && mypy conformance
 	cd impls/reference && mypy wash
 	cd tools/sdt && mypy sdt
+	cd tools/install && mypy washinstall
 
 sdt-test:
 	cd tools/sdt && $(PYTHON) -m pytest -q
+
+install-tool-test:
+	cd tools/install && $(PYTHON) -m pytest -q
 
 ui-test:
 	$(PYTHON) -m pytest -q tests/ui
@@ -45,7 +49,7 @@ ui-test:
 smoke-ui:
 	$(PYTHON) -m pytest -q tests/ui/test_demo_smoke.py
 
-test: validate unit lint typecheck conformance sdt-test ui-test
+test: validate unit lint typecheck conformance sdt-test install-tool-test ui-test
 
 coverage:
 	wash-conformance coverage
