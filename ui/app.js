@@ -29,6 +29,7 @@ import {
 import { bindKeyboardShortcuts } from "./modules/keyboard.js";
 import {
   confirmMutation,
+  mutatesBadge,
   renderIntegrityBanner,
   renderPostureBanner,
 } from "./modules/chrome.js";
@@ -154,7 +155,11 @@ async function loadChrome() {
       const a = document.createElement("a");
       a.className = "chip";
       a.href = framedPath(command.name);
-      a.textContent = `${command.name}${command.mutates ? " mutates" : ""}`;
+      a.appendChild(document.createTextNode(command.name));
+      if (command.mutates) {
+        a.appendChild(document.createTextNode(" "));
+        a.appendChild(mutatesBadge());
+      }
       return a;
     }),
   );

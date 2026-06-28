@@ -95,3 +95,20 @@ def test_shell_directory_uses_root_for_pipeline_results() -> None:
 
     assert payload["pipeline"] == "."
     assert payload["node"] == "0/1"
+
+
+def test_active_sibling_branch_detects_deep_linked_branch() -> None:
+    payload = _node_eval(
+        textwrap.dedent(
+            """
+            import { activeSiblingBranch } from './ui/modules/thread.js';
+            console.log(JSON.stringify({
+              match: activeSiblingBranch('/notebook/2/a', '/notebook', ['1', '2']),
+              miss: activeSiblingBranch('/notebook/0/a', '/notebook', ['1', '2']),
+            }));
+            """
+        )
+    )
+
+    assert payload["match"] == "2"
+    assert payload["miss"] is None

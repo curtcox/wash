@@ -92,6 +92,21 @@ export function shellDirectory(target, headers = {}) {
   return dir === "/" ? "." : dir.replace(/^\/+/, "");
 }
 
+export function activeSiblingBranch(activePath, parentPath, siblings = []) {
+  const nodeDir = nodeDirectoryFor(activePath);
+  const parent = normalizeTarget(parentPath);
+  for (const sibling of siblings) {
+    const branchPath =
+      parent === "/"
+        ? `/${sibling}`
+        : `${parent}/${sibling}`.replace(/\/+/g, "/");
+    if (nodeDir === branchPath || nodeDir.startsWith(`${branchPath}/`)) {
+      return sibling;
+    }
+  }
+  return null;
+}
+
 export function isThreadContext(kind) {
   return kind === "sdt-node" || kind === "sdt-collection";
 }
@@ -203,12 +218,15 @@ function renderThreadNode(node, activePath, names = []) {
   if (node.siblings.length > 0) {
     const details = document.createElement("details");
     details.className = "thread-branches";
+    const parent = node.path.split("/").slice(0, -1).join("/") || "/";
+    if (activeSiblingBranch(activePath, parent, node.siblings)) {
+      details.open = true;
+    }
     const summary = document.createElement("summary");
     summary.textContent = `${node.siblings.length} branch${node.siblings.length === 1 ? "" : "es"}`;
     details.appendChild(summary);
     const list = document.createElement("div");
     list.className = "branch-list";
-    const parent = node.path.split("/").slice(0, -1).join("/") || "/";
     for (const sibling of node.siblings) {
       const branch = document.createElement("a");
       branch.className = "chip";

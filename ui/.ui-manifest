@@ -10,6 +10,7 @@ ui/modules/files.js
 ui/modules/panels.js
 ui/modules/editor.js
 ui/modules/integrity.js
+ui/modules/keyboard.js
 ui/vendor/sdt_support.py
 ui/vendor/markdown.js
 ui/vendor/json-view.js

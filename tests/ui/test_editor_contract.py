@@ -87,3 +87,11 @@ def test_available_mutations_for_plain_file_and_sdt_node() -> None:
     assert "delete" in payload["plain"]
     assert "append-child" in payload["sdt"]
     assert "append-sibling" in payload["sdt"]
+
+
+def test_body_editor_supports_file_upload() -> None:
+    editor = (REPO_ROOT / "ui" / "modules" / "editor.js").read_text(encoding="utf-8")
+
+    assert 'type = "file"' in editor
+    assert "Upload file" in editor
+    assert "file.text()" in editor

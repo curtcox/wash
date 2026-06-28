@@ -28,6 +28,7 @@ def test_manifest_lists_bundle_paths() -> None:
     required = [
         "ui/index.html",
         "ui/app.js",
+        "ui/modules/keyboard.js",
         "bin/ui",
         "bin/wash-ui-install",
         "env/path",
@@ -122,3 +123,10 @@ def test_wash_ui_install_aborts_on_conflict(tmp_path: Path) -> None:
     assert result.returncode == 1
     assert "conflicts:" in result.stderr
     assert "bin/ui" in result.stderr
+
+
+def test_layout_supports_large_screen_breakpoint() -> None:
+    css = (REPO_ROOT / "ui" / "style.css").read_text(encoding="utf-8")
+
+    assert "min-width: 1400px" in css
+    assert "28vw" in css

@@ -34,3 +34,10 @@ def test_app_wires_explicit_method_controls() -> None:
     assert "Save" in app or "save" in app
     assert "Delete" in app or "delete" in app
     assert "resolved path" in app.lower() or "resolvedPath" in app
+
+
+def test_commands_panel_uses_mutates_badge() -> None:
+    app = (REPO_ROOT / "ui" / "app.js").read_text(encoding="utf-8")
+
+    assert "mutatesBadge" in app
+    assert "command.mutates" in app
