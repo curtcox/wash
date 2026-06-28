@@ -106,6 +106,96 @@ export async function postTerm(directory) {
   return response.json();
 }
 
+export async function putResource(target, body) {
+  const response = await fetch(rawPath(target), {
+    method: "PUT",
+    body,
+  });
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`PUT ${target} returned ${response.status}: ${text.slice(0, 200)}`);
+  }
+  return response;
+}
+
+export async function deleteResource(target) {
+  const response = await fetch(rawPath(target), { method: "DELETE" });
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`DELETE ${target} returned ${response.status}: ${text.slice(0, 200)}`);
+  }
+  return response;
+}
+
+export async function postResource(target, body) {
+  const response = await fetch(rawPath(target), {
+    method: "POST",
+    body,
+  });
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`POST ${target} returned ${response.status}: ${text.slice(0, 200)}`);
+  }
+  return response;
+}
+
+export async function postAppend(parentPath, body) {
+  const suffix = (parentPath || ".").replace(/^\/+/, "") || ".";
+  const response = await fetch(`/append/${suffix}`, {
+    method: "POST",
+    body,
+    headers: { Accept: "application/json" },
+  });
+  const text = await response.text();
+  if (!response.ok) {
+    throw new Error(`append returned ${response.status}: ${text.slice(0, 200)}`);
+  }
+  try {
+    return JSON.parse(text);
+  } catch {
+    throw new Error(`append returned non-JSON: ${text.slice(0, 200)}`);
+  }
+}
+
+export async function postNameNew(scope, name, target) {
+  return postNameCommand("name-new", scope, name, target);
+}
+
+export async function postNameSet(scope, name, target) {
+  return postNameCommand("name-set", scope, name, target);
+}
+
+export async function postNameRm(scope, name) {
+  return postNameCommand("name-rm", scope, name);
+}
+
+async function postNameCommand(command, scope, name, target = "") {
+  const scopeSeg = encodePathSegment(normalizeScope(scope));
+  const nameSeg = encodePathSegment(name);
+  const parts = [command, scopeSeg, nameSeg];
+  if (target) {
+    parts.push(...target.replace(/^\/+/, "").split("/").map(encodePathSegment));
+  }
+  const response = await fetch(`/${parts.join("/")}`, { method: "POST" });
+  const text = await response.text();
+  if (!response.ok) {
+    throw new Error(`${command} returned ${response.status}: ${text.slice(0, 200)}`);
+  }
+  return text;
+}
+
+function normalizeScope(scope) {
+  const trimmed = (scope || ".").trim();
+  if (!trimmed || trimmed === "/") {
+    return ".";
+  }
+  return trimmed.replace(/^\/+/, "");
+}
+
+function encodePathSegment(segment) {
+  return encodeURIComponent(segment);
+}
+
 async function getJson(path) {
   const response = await fetch(path, { headers: { Accept: "application/json" } });
   if (!response.ok) {

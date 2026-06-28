@@ -364,6 +364,87 @@ dd {
   margin-bottom: 8px;
 }
 
+.author-panel {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  margin-bottom: 16px;
+  padding: 14px;
+}
+
+.author-panel-inner h2,
+.author-panel-inner h3 {
+  font-size: 14px;
+  margin: 0 0 10px;
+  text-transform: uppercase;
+}
+
+.author-resolved,
+.name-preview,
+.meta-validation {
+  color: var(--muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  margin: 0 0 10px;
+  overflow-wrap: anywhere;
+}
+
+.meta-validation.error {
+  color: var(--danger);
+}
+
+.body-editor {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.body-textarea {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  min-height: 140px;
+  resize: vertical;
+  width: 100%;
+}
+
+.upload-row {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.author-toolbar,
+.name-row,
+.rename-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.author-action {
+  background: var(--panel);
+}
+
+.mutates-badge {
+  background: color-mix(in srgb, var(--danger) 18%, Canvas);
+  border: 1px solid var(--danger);
+  border-radius: 999px;
+  color: var(--danger);
+  font-size: 11px;
+  font-weight: 700;
+  padding: 1px 6px;
+  text-transform: uppercase;
+}
+
+.name-editor {
+  border-top: 1px solid var(--line);
+  margin-top: 12px;
+  padding-top: 12px;
+}
+
+.name-row input,
+.rename-row input {
+  flex: 1 1 160px;
+}
+
 @media (max-width: 860px) {
   .topbar,
   .layout {

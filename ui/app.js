@@ -16,9 +16,18 @@ import {
   getHelp,
   getNames,
   getRootInfo,
+  postAppend,
+  postNameNew,
+  postNameRm,
+  postNameSet,
+  postResource,
   postTerm,
+  putResource,
+  deleteResource,
 } from "./modules/api.js";
+import { confirmMutation } from "./modules/chrome.js";
 import { hideFilesBrowser, renderFilesBrowser } from "./modules/files.js";
+import { renderAuthorPanel } from "./modules/editor.js";
 import {
   renderExplainPanel,
   renderNamesPanel,
@@ -28,6 +37,7 @@ import { renderResource } from "./modules/render.js";
 import {
   buildThreadModel,
   detectNodeKind,
+  directoryFor,
   isThreadContext,
   renderThread,
   shellDirectory,
@@ -37,6 +47,7 @@ import { setDefinitionList, setStatus } from "./modules/chrome.js";
 const api = { fetchListing, fetchText };
 
 const els = {
+  author: document.querySelector("#author-panel"),
   backing: document.querySelector("#backing-panel"),
   commands: document.querySelector("#commands-panel"),
   content: document.querySelector("#content"),
@@ -168,6 +179,7 @@ async function load() {
   els.raw.href = rawPath(target);
   setStatus(els.status, "Loading live resource...");
   els.content.replaceChildren();
+  hideAuthorPanel();
   hideFilesBrowser(els.files);
   els.thread.replaceChildren();
   els.thread.hidden = true;
@@ -190,6 +202,7 @@ async function load() {
     loadExplain(target);
 
     if (viewMode === "files") {
+      hideAuthorPanel();
       await renderFilesBrowser(els.files, target, api, { names: namesPayload.names });
       els.content.hidden = true;
       els.thread.hidden = true;
@@ -209,11 +222,161 @@ async function load() {
 
     els.content.hidden = false;
     await renderResource(els.content, resource);
+    await renderAuthor(target, kind, resource);
   } catch (error) {
     setStatus(els.status, error.message);
     els.kind.textContent = "";
+    hideAuthorPanel();
     renderExplainPanel(els.explain, null, { error: error.message });
   }
+}
+
+async function renderAuthor(target, kind, resource) {
+  let initialText = "";
+  if (resource.ok && resource.blob) {
+    try {
+      initialText = await resource.blob.text();
+    } catch {
+      initialText = "";
+    }
+  }
+  const resolvedPath =
+    resource.headers?.["resolved path"] || rawPath(target);
+  renderAuthorPanel(
+    els.author,
+    {
+      target,
+      kind,
+      resourceOk: resource.ok,
+      resolvedPath,
+      initialText,
+      names: namesPayload.names,
+    },
+    {
+      onSave: async (body, { exists, resolvedPath: resolved }) => {
+        if (
+          !(await confirmMutation({
+            action: exists ? "Save" : "Create",
+            method: "PUT",
+            resolvedPath: resolved,
+          }))
+        ) {
+          return;
+        }
+        await putResource(target, body);
+        location.reload();
+      },
+      onDelete: async ({ resolvedPath: resolved }) => {
+        if (
+          !(await confirmMutation({
+            action: "Delete",
+            method: "DELETE",
+            resolvedPath: resolved,
+          }))
+        ) {
+          return;
+        }
+        await deleteResource(target);
+        location.href = framedPath(directoryFor(target));
+      },
+      onRename: async (newPath, { from }) => {
+        const resolved = rawPath(newPath);
+        if (
+          !(await confirmMutation({
+            action: "Rename (PUT new path)",
+            method: "PUT",
+            resolvedPath: resolved,
+          }))
+        ) {
+          return;
+        }
+        const body = await fetchText(from).catch(() => "");
+        await putResource(newPath, body);
+        if (
+          !(await confirmMutation({
+            action: "Rename (DELETE old path)",
+            method: "DELETE",
+            resolvedPath: from,
+          }))
+        ) {
+          return;
+        }
+        await deleteResource(from);
+        location.href = framedPath(newPath);
+      },
+      onRun: async (body, { resolvedPath: resolved }) => {
+        if (
+          !(await confirmMutation({
+            action: "Run",
+            method: "POST",
+            resolvedPath: resolved,
+          }))
+        ) {
+          return;
+        }
+        await postResource(target, body);
+        location.reload();
+      },
+      onAppend: async (parentPath, body, { resolvedPath: resolved }) => {
+        if (
+          !(await confirmMutation({
+            action: "Append SDT node",
+            method: "POST",
+            resolvedPath: resolved,
+          }))
+        ) {
+          return;
+        }
+        const payload = await postAppend(parentPath, body);
+        const locationPath = payload.location || payload.created;
+        location.href = framedPath(`${locationPath}/a`);
+      },
+      onNameNew: async (scope, name, nameTarget) => {
+        if (
+          !(await confirmMutation({
+            action: "Create name",
+            method: "POST",
+            resolvedPath: `${scope}:${name} → ${nameTarget}`,
+          }))
+        ) {
+          return;
+        }
+        await postNameNew(scope, name, nameTarget);
+        location.reload();
+      },
+      onNameSet: async (scope, name, nameTarget) => {
+        if (
+          !(await confirmMutation({
+            action: "Retarget name",
+            method: "POST",
+            resolvedPath: `${scope}:${name} → ${nameTarget}`,
+          }))
+        ) {
+          return;
+        }
+        await postNameSet(scope, name, nameTarget);
+        location.reload();
+      },
+      onNameRm: async (scope, name) => {
+        if (
+          !(await confirmMutation({
+            action: "Drop name",
+            method: "POST",
+            resolvedPath: `${scope}:${name}`,
+          }))
+        ) {
+          return;
+        }
+        await postNameRm(scope, name);
+        location.reload();
+      },
+    },
+  );
+}
+
+function hideAuthorPanel() {
+  els.author.hidden = true;
+  els.author.replaceChildren();
 }
 
 async function loadExplain(target) {

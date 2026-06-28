@@ -13,3 +13,16 @@ export function setDefinitionList(node, values) {
   }
   node.replaceChildren(...children);
 }
+
+export function mutatesBadge({ label = "mutates" } = {}) {
+  const badge = document.createElement("span");
+  badge.className = "mutates-badge";
+  badge.textContent = label;
+  return badge;
+}
+
+export async function confirmMutation({ action, method, resolvedPath }) {
+  const path = resolvedPath || "unknown";
+  const message = `${action} via ${method} will touch:\n${path}\n\nContinue?`;
+  return window.confirm(message);
+}
