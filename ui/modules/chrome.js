@@ -26,3 +26,26 @@ export async function confirmMutation({ action, method, resolvedPath }) {
   const message = `${action} via ${method} will touch:\n${path}\n\nContinue?`;
   return window.confirm(message);
 }
+
+export function renderPostureBanner(node, { nonLocal = false } = {}) {
+  if (!nonLocal) {
+    node.hidden = true;
+    node.replaceChildren();
+    return;
+  }
+  node.hidden = false;
+  node.className = "banner banner-warning";
+  node.textContent =
+    "This wash UI assumes a trusted localhost origin. You are not on localhost — proceed only if you trust this server.";
+}
+
+export function renderIntegrityBanner(node, message) {
+  if (!message) {
+    node.hidden = true;
+    node.replaceChildren();
+    return;
+  }
+  node.hidden = false;
+  node.className = "banner banner-integrity";
+  node.textContent = message;
+}

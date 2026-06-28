@@ -25,7 +25,12 @@ import {
   putResource,
   deleteResource,
 } from "./modules/api.js";
-import { confirmMutation } from "./modules/chrome.js";
+import {
+  confirmMutation,
+  renderIntegrityBanner,
+  renderPostureBanner,
+} from "./modules/chrome.js";
+import { bundlePathWarning, isNonLocalOrigin, loadManifest } from "./modules/integrity.js";
 import { hideFilesBrowser, renderFilesBrowser } from "./modules/files.js";
 import { renderAuthorPanel } from "./modules/editor.js";
 import {
@@ -47,6 +52,8 @@ import { setDefinitionList, setStatus } from "./modules/chrome.js";
 const api = { fetchListing, fetchText };
 
 const els = {
+  integrity: document.querySelector("#integrity-banner"),
+  posture: document.querySelector("#posture-banner"),
   author: document.querySelector("#author-panel"),
   backing: document.querySelector("#backing-panel"),
   commands: document.querySelector("#commands-panel"),
@@ -76,6 +83,7 @@ const els = {
 let commandCatalog = [];
 let namesPayload = { names: [], findings: [] };
 let explainAvailable = true;
+let bundleManifest = [];
 
 async function boot() {
   els.form.addEventListener("submit", (event) => {
@@ -90,6 +98,8 @@ async function boot() {
     const result = await postTerm(directory);
     window.alert(result.message || result.command || "No terminal launcher is configured.");
   });
+  bundleManifest = await loadManifest();
+  renderPostureBanner(els.posture, { nonLocal: isNonLocalOrigin() });
   await loadChrome();
   await load();
 }
@@ -185,11 +195,18 @@ async function load() {
   els.thread.hidden = true;
   renderExplainPanel(els.explain, null, { loading: true });
   renderResolvedPath(els.resolved, {});
+  renderIntegrityBanner(els.integrity, bundlePathWarning(target, bundleManifest));
 
   try {
     const resource = await fetchResource(target);
     lastHeaders = resource.headers;
     renderResolvedPath(els.resolved, resource.headers);
+    const resolvedTarget = resource.headers["resolved path"] || target;
+    renderIntegrityBanner(
+      els.integrity,
+      bundlePathWarning(resolvedTarget, bundleManifest) ||
+        bundlePathWarning(target, bundleManifest),
+    );
     const kind = detectNodeKind(target, { commands: commandCatalog, resource });
     els.kind.textContent = `Kind: ${kind}`;
     setDefinitionList(els.run, resource.headers);
