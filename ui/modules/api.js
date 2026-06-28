@@ -72,6 +72,34 @@ export async function fetchText(target) {
   return response.text();
 }
 
+export async function probeFeatures() {
+  const features = {
+    executionHeaders: false,
+    explain: false,
+    mutation: false,
+  };
+  try {
+    const response = await fetch("/", {
+      headers: { Accept: "text/plain" },
+    });
+    features.executionHeaders = HEADER_KEYS.some((key) =>
+      response.headers.get(key),
+    );
+    features.mutation = response.headers.has("Allow")
+      ? response.headers.get("Allow").includes("PUT")
+      : true;
+  } catch {
+    return features;
+  }
+  try {
+    await getExplain("/");
+    features.explain = true;
+  } catch {
+    features.explain = false;
+  }
+  return features;
+}
+
 export async function getRootInfo() {
   return getJson("/rootinfo");
 }

@@ -22,9 +22,11 @@ import {
   postNameSet,
   postResource,
   postTerm,
+  probeFeatures,
   putResource,
   deleteResource,
 } from "./modules/api.js";
+import { bindKeyboardShortcuts } from "./modules/keyboard.js";
 import {
   confirmMutation,
   renderIntegrityBanner,
@@ -92,6 +94,7 @@ const els = {
 
 let commandCatalog = [];
 let namesPayload = { names: [], findings: [] };
+let hostFeatures = { executionHeaders: false, explain: false, mutation: false };
 let explainAvailable = true;
 let bundleManifest = [];
 
@@ -103,12 +106,21 @@ async function boot() {
   els.input.addEventListener("input", updatePreview);
   els.reload.addEventListener("click", () => load());
   window.addEventListener("hashchange", () => load());
+  bindKeyboardShortcuts({
+    focusPath: () => {
+      els.input.focus();
+      els.input.select();
+    },
+    reload: () => load(),
+  });
   els.shell.addEventListener("click", async () => {
     const directory = shellDirectory(currentTarget(), lastHeaders);
     const result = await postTerm(directory);
     window.alert(result.message || result.command || "No terminal launcher is configured.");
   });
   bundleManifest = await loadManifest();
+  hostFeatures = await probeFeatures().catch(() => hostFeatures);
+  explainAvailable = hostFeatures.explain;
   renderPostureBanner(els.posture, { nonLocal: isNonLocalOrigin() });
   await loadChrome();
   await load();
@@ -122,6 +134,9 @@ async function loadChrome() {
     path: root.root || "unknown",
     origin: location.origin,
     status: root.error || "ready",
+    headers: hostFeatures.executionHeaders ? "present" : "absent",
+    explain: hostFeatures.explain ? "available" : "unavailable",
+    mutation: hostFeatures.mutation ? "available" : "unavailable",
   });
   const [commands, names, help] = await Promise.all([
     getCommands().catch(() => ({ commands: [] })),

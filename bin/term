@@ -1,15 +1,90 @@
 #!/usr/bin/env python3
 import json
 import os
+import shlex
 import subprocess
 import sys
 from pathlib import Path
 
-target = Path.cwd() / (sys.argv[1] if len(sys.argv) > 1 else ".")
-target = target if target.is_dir() else target.parent
-command = f"cd {target}"
-launched = False
-if os.environ.get("WASH_UI_LAUNCH_TERMINAL") == "1" and sys.platform == "darwin":
-    subprocess.Popen(["open", "-a", "Terminal", str(target)])
-    launched = True
-print(json.dumps({"launched": launched, "command": command, "message": command}))
+
+def _target_dir() -> Path:
+    target = Path.cwd() / (sys.argv[1] if len(sys.argv) > 1 else ".")
+    return target if target.is_dir() else target.parent
+
+
+def _should_launch() -> bool:
+    if os.environ.get("WASH_UI_LAUNCH_TERMINAL") == "0":
+        return False
+    if os.environ.get("WASH_UI_LAUNCH_TERMINAL") == "1":
+        return True
+    if os.environ.get("CI"):
+        return False
+    return sys.stdin.isatty()
+
+
+def _launch_macos(directory: Path) -> bool:
+    subprocess.Popen(["open", "-a", "Terminal", str(directory)])
+    return True
+
+
+def _launch_linux(directory: Path) -> bool:
+    terminal = os.environ.get("TERMINAL", "").strip()
+    command = f"cd {shlex.quote(str(directory))}; exec ${SHELL:-/bin/sh}"
+    candidates = []
+    if terminal:
+        candidates.append([terminal, "-e", command])
+        candidates.append([terminal, "--", "sh", "-lc", command])
+    candidates.extend(
+        [
+            ["x-terminal-emulator", "-e", command],
+            ["gnome-terminal", "--", "sh", "-lc", command],
+            ["konsole", "-e", command],
+            ["xfce4-terminal", "-e", command],
+        ]
+    )
+    for argv in candidates:
+        if not argv[0]:
+            continue
+        try:
+            subprocess.Popen(argv)
+            return True
+        except OSError:
+            continue
+    return False
+
+
+def _launch_terminal(directory: Path) -> bool:
+    if not _should_launch():
+        return False
+    if sys.platform == "darwin":
+        return _launch_macos(directory)
+    if sys.platform.startswith("linux"):
+        return _launch_linux(directory)
+    return False
+
+
+def main() -> None:
+    directory = _target_dir()
+    command = f"cd {directory}"
+    launched = False
+    message = command
+    try:
+        launched = _launch_terminal(directory)
+        if launched:
+            message = f"Launched terminal at {directory}"
+    except OSError as exc:
+        message = f"{command} ({exc})"
+    print(
+        json.dumps(
+            {
+                "launched": launched,
+                "command": command,
+                "message": message,
+                "directory": str(directory),
+            }
+        )
+    )
+
+
+if __name__ == "__main__":
+    main()

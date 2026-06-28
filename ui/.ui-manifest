@@ -11,6 +11,7 @@ ui/modules/panels.js
 ui/modules/editor.js
 ui/modules/integrity.js
 ui/vendor/sdt_support.py
+ui/vendor/markdown.js
 ui/RECOVERY.md
 ui/.ui-manifest
 bin/ui

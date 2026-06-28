@@ -1,7 +1,8 @@
 # wash UI demo root
 
 Small SDT notebook with a sample command and `c` names (including a dangling
-target) for manual UI verification.
+target) for manual UI verification. Also includes `notes.md` for markdown
+rendering checks.
 
 Install the bundle, then serve this root:
 

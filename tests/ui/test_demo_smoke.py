@@ -78,6 +78,7 @@ def test_demo_fixture_has_notebook_command_and_names() -> None:
     demo = REPO_ROOT / "demo"
     assert (demo / "notebook" / "0" / "a").is_file()
     assert (demo / "bin" / "greet").is_file()
+    assert (demo / "notes.md").is_file()
     assert (demo / "c").is_file()
     assert "gone /missing/path" in (demo / "c").read_text(encoding="utf-8")
 
