@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 import json
+import shutil
 import sys
+import tempfile
 from pathlib import Path
 
 bundle_root = Path(__file__).resolve().parents[1]
@@ -55,4 +57,96 @@ def collect_names():
     return sorted(entries, key=lambda item: (item["scope"], item["name"]))
 
 
-print(json.dumps({"findings": findings, "names": collect_names()}, indent=2))
+def root() -> Path:
+    return Path.cwd().resolve()
+
+
+def clean_scope(scope_arg):
+    scope = (scope_arg or ".").strip() or "."
+    if scope == "/":
+        scope = "."
+    return scope.lstrip("/")
+
+
+def write_name(root_path, scope_arg, name, target, *, replace):
+    scope = (root_path / clean_scope(scope_arg)).resolve()
+    if root_path not in [scope, *scope.parents]:
+        raise ValueError("scope escapes root")
+    if not scope.is_dir():
+        raise ValueError(f"scope is not a directory: {scope_arg}")
+    c_file = scope / "c"
+    lines = []
+    if c_file.is_file():
+        lines = [
+            line
+            for line in c_file.read_text(encoding="utf-8").splitlines()
+            if not line.split() or line.split()[0] != name
+        ]
+    elif replace:
+        lines = []
+    lines.append(f"{name} {target}")
+    c_file.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def preview_name(scope_arg, name, target):
+    if not name or not target:
+        return {
+            "valid": False,
+            "status": "error",
+            "messages": ["name and target are required"],
+            "findings": [],
+        }
+    if any(ch.isspace() for ch in target):
+        return {
+            "valid": False,
+            "status": "error",
+            "messages": ["single target only in v1"],
+            "findings": [],
+        }
+    source = root()
+    try:
+        with tempfile.TemporaryDirectory(prefix="wash-name-preview-") as tmp:
+            draft = Path(tmp) / "root"
+            shutil.copytree(source, draft, symlinks=True)
+            write_name(draft.resolve(), scope_arg, name, target, replace=True)
+            draft_findings = [finding.__dict__ for finding in lint_tree(draft)]
+            scope_name = f"{clean_scope(scope_arg) or '.'}:{name}"
+            if scope_name.startswith(".:"):
+                scope_name = f".:{name}"
+            relevant = [
+                finding
+                for finding in draft_findings
+                if finding.get("location") == scope_name
+            ]
+            messages = [finding["message"] for finding in relevant]
+            has_error = any(finding["severity"] == "error" for finding in relevant)
+            has_warning = any(finding["severity"] == "warning" for finding in relevant)
+            inert = (source / clean_scope(scope_arg) / name).exists()
+            if inert:
+                messages.append("name is inert because a literal child already exists")
+            if not messages:
+                messages.append(f"{scope_name} resolves to {target}")
+            return {
+                "valid": not has_error,
+                "status": "error" if has_error else "warning" if has_warning else "info" if inert else "ok",
+                "scope": clean_scope(scope_arg) or ".",
+                "name": name,
+                "target": target,
+                "inert": inert,
+                "findings": relevant,
+                "messages": messages,
+            }
+    except ValueError as exc:
+        return {
+            "valid": False,
+            "status": "error",
+            "messages": [str(exc)],
+            "findings": [],
+        }
+
+
+payload = {"findings": findings, "names": collect_names()}
+if len(sys.argv) >= 5 and sys.argv[1] == "preview":
+    payload["preview"] = preview_name(sys.argv[2], sys.argv[3], sys.argv[4])
+
+print(json.dumps(payload, indent=2))

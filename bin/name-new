@@ -1,13 +1,71 @@
 #!/usr/bin/env python3
+import json
+import shutil
 from pathlib import Path
 import sys
+import tempfile
 
-scope = Path.cwd() / (sys.argv[1] if len(sys.argv) > 1 else ".")
+bundle_root = Path(__file__).resolve().parents[1]
+sdt_path = bundle_root / "tools" / "sdt"
+if sdt_path.is_dir():
+    sys.path.insert(0, str(sdt_path))
+vendor_path = bundle_root / "ui" / "vendor"
+if vendor_path.is_dir():
+    sys.path.insert(0, str(vendor_path))
+
+try:
+    from sdt.lint import lint_tree
+except ImportError:
+    from sdt_support import lint_tree
+
+
+def clean_scope(value):
+    scope = (value or ".").strip() or "."
+    if scope == "/":
+        scope = "."
+    return scope.lstrip("/")
+
+
+def write_name(root, scope_arg, name, target):
+    scope = (root / clean_scope(scope_arg)).resolve()
+    if root not in [scope, *scope.parents]:
+        raise ValueError("scope escapes root")
+    if not scope.is_dir():
+        raise ValueError(f"scope is not a directory: {scope_arg}")
+    with (scope / "c").open("a", encoding="utf-8") as f:
+        f.write(f"{name} {target}\n")
+
+
+def validate(root, scope_arg, name, target):
+    if not name or not target:
+        raise ValueError("usage: name-new <scope> <name> <target>")
+    if any(ch.isspace() for ch in target):
+        raise ValueError("single target only in v1")
+    with tempfile.TemporaryDirectory(prefix="wash-name-new-") as tmp:
+        draft = Path(tmp) / "root"
+        shutil.copytree(root, draft, symlinks=True)
+        write_name(draft.resolve(), scope_arg, name, target)
+        location = f"{clean_scope(scope_arg) or '.'}:{name}"
+        relevant = [
+            finding.__dict__
+            for finding in lint_tree(draft)
+            if finding.location == location
+        ]
+    errors = [finding for finding in relevant if finding["severity"] == "error"]
+    warnings = [finding for finding in relevant if finding["severity"] == "warning"]
+    if errors:
+        raise ValueError("; ".join(finding["message"] for finding in errors))
+    return warnings
+
+
+root = Path.cwd().resolve()
+scope = sys.argv[1] if len(sys.argv) > 1 else "."
 name = sys.argv[2] if len(sys.argv) > 2 else ""
 target = sys.argv[3] if len(sys.argv) > 3 else ""
-if not name or not target:
-    print("usage: name-new <scope> <name> <target>")
+try:
+    warnings = validate(root, scope, name, target)
+    write_name(root, scope, name, target)
+except ValueError as exc:
+    print(json.dumps({"ok": False, "error": str(exc)}))
     raise SystemExit(2)
-with (scope / "c").open("a", encoding="utf-8") as f:
-    f.write(f"{name} {target}\n")
-print("ok")
+print(json.dumps({"ok": True, "warnings": warnings}))

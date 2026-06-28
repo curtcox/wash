@@ -112,6 +112,14 @@ export async function getNames() {
   return getJson("/names");
 }
 
+export async function getNamePreview(scope, name, target) {
+  const params = new URLSearchParams();
+  for (const value of ["preview", normalizeScope(scope), name, target]) {
+    params.append("arg", value || "");
+  }
+  return getJson(`/names?${params.toString()}`);
+}
+
 export async function getHelp() {
   return getJson("/help");
 }
@@ -198,13 +206,13 @@ export async function postNameRm(scope, name) {
 }
 
 async function postNameCommand(command, scope, name, target = "") {
-  const scopeSeg = encodePathSegment(normalizeScope(scope));
-  const nameSeg = encodePathSegment(name);
-  const parts = [command, scopeSeg, nameSeg];
+  const params = new URLSearchParams();
+  params.append("arg", normalizeScope(scope));
+  params.append("arg", name || "");
   if (target) {
-    parts.push(...target.replace(/^\/+/, "").split("/").map(encodePathSegment));
+    params.append("arg", target);
   }
-  const response = await fetch(`/${parts.join("/")}`, { method: "POST" });
+  const response = await fetch(`/${command}?${params.toString()}`, { method: "POST" });
   const text = await response.text();
   if (!response.ok) {
     throw new Error(`${command} returned ${response.status}: ${text.slice(0, 200)}`);
@@ -218,10 +226,6 @@ function normalizeScope(scope) {
     return ".";
   }
   return trimmed.replace(/^\/+/, "");
-}
-
-function encodePathSegment(segment) {
-  return encodeURIComponent(segment);
 }
 
 async function getJson(path) {

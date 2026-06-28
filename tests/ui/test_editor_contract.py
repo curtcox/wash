@@ -36,6 +36,7 @@ def test_editor_module_exports_phase4_helpers() -> None:
     assert "validateMetaText" in editor
     assert "defaultNameScope" in editor
     assert "availableMutations" in editor
+    assert "formatNamePreview" in editor
     assert "renderAuthorPanel" in editor
     assert "renderAuthorPanel" in app
 
@@ -77,6 +78,7 @@ def test_available_mutations_for_plain_file_and_sdt_node() -> None:
             import { availableMutations } from './ui/modules/editor.js';
             console.log(JSON.stringify({
               plain: availableMutations({ kind: 'plain-file', resourceOk: true }),
+              directory: availableMutations({ kind: 'directory', resourceOk: true }),
               sdt: availableMutations({ kind: 'sdt-node', resourceOk: true }),
             }));
             """
@@ -85,8 +87,43 @@ def test_available_mutations_for_plain_file_and_sdt_node() -> None:
 
     assert "save" in payload["plain"]
     assert "delete" in payload["plain"]
+    assert "delete" in payload["directory"]
     assert "append-child" in payload["sdt"]
     assert "append-sibling" in payload["sdt"]
+
+
+def test_name_preview_formats_error_warning_and_inert_states() -> None:
+    payload = _node_eval(
+        textwrap.dedent(
+            """
+            import { formatNamePreview } from './ui/modules/editor.js';
+            console.log(JSON.stringify({
+              dangling: formatNamePreview({
+                valid: false,
+                status: 'error',
+                messages: ['unknown name'],
+              }),
+              escape: formatNamePreview({
+                valid: true,
+                status: 'warning',
+                messages: ['resolves outside the root'],
+              }),
+              inert: formatNamePreview({
+                valid: true,
+                status: 'info',
+                messages: ['name is inert because a literal child already exists'],
+              }),
+            }));
+            """
+        )
+    )
+
+    assert payload["dangling"]["className"] == "error"
+    assert "unknown name" in payload["dangling"]["text"]
+    assert payload["escape"]["className"] == "warning"
+    assert "outside" in payload["escape"]["text"]
+    assert payload["inert"]["className"] == "info"
+    assert "inert" in payload["inert"]["text"]
 
 
 def test_body_editor_supports_file_upload() -> None:

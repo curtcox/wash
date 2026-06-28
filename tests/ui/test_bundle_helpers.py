@@ -22,6 +22,18 @@ def _run_helper(name: str, root: Path, *args: str, stdin: bytes = b"") -> dict:
     return json.loads(proc.stdout)
 
 
+def _run_helper_raw(
+    name: str, root: Path, *args: str, stdin: bytes = b""
+) -> subprocess.CompletedProcess[bytes]:
+    return subprocess.run(
+        [str(REPO_ROOT / "bin" / name), *args],
+        cwd=root,
+        input=stdin,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+
+
 def _write(root: Path, rel: str, content: str) -> None:
     path = root / rel
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -80,6 +92,63 @@ def test_names_reports_winning_targets(tmp_path: Path) -> None:
             "inert": False,
         }
     ]
+
+
+def test_names_preview_reports_resolution_states(tmp_path: Path) -> None:
+    outside = tmp_path.parent / "wash-ui-preview-outside.txt"
+    outside.write_text("secret", encoding="utf-8")
+    _write(tmp_path, "ok/a", "ok\n")
+    _write(tmp_path, "literal", "shadow\n")
+
+    dangling = _run_helper("names", tmp_path, "preview", ".", "gone", "/missing")
+    loop = _run_helper("names", tmp_path, "preview", ".", "loop", "loop")
+    escape = _run_helper(
+        "names", tmp_path, "preview", ".", "escape", f"../{outside.name}"
+    )
+    inert = _run_helper("names", tmp_path, "preview", ".", "literal", "/ok/a")
+
+    assert dangling["preview"]["valid"] is False
+    assert dangling["preview"]["status"] == "error"
+    assert any(
+        finding["code"] == "dangling-target"
+        for finding in dangling["preview"]["findings"]
+    )
+    assert loop["preview"]["valid"] is False
+    assert any(
+        finding["code"] == "name-cycle" for finding in loop["preview"]["findings"]
+    )
+    assert escape["preview"]["valid"] is True
+    assert escape["preview"]["status"] == "warning"
+    assert any(
+        finding["code"] == "escape-target"
+        for finding in escape["preview"]["findings"]
+    )
+    assert inert["preview"]["valid"] is True
+    assert inert["preview"]["status"] == "info"
+    assert inert["preview"]["inert"] is True
+
+
+def test_name_helpers_refuse_invalid_targets_and_report_escape(
+    tmp_path: Path,
+) -> None:
+    outside = tmp_path.parent / "wash-ui-name-outside.txt"
+    outside.write_text("secret", encoding="utf-8")
+    _write(tmp_path, "ok/a", "ok\n")
+
+    dangling = _run_helper_raw("name-new", tmp_path, ".", "gone", "/missing")
+    loop = _run_helper_raw("name-set", tmp_path, ".", "loop", "loop")
+    escape = _run_helper("name-new", tmp_path, ".", "escape", f"../{outside.name}")
+
+    assert dangling.returncode != 0
+    dangling_stdout = dangling.stdout.decode("utf-8")
+    assert "not a directory" in dangling_stdout or "unknown name" in dangling_stdout
+    assert loop.returncode != 0
+    assert "loop" in loop.stdout.decode("utf-8")
+    assert escape["ok"] is True
+    assert any(finding["code"] == "escape-target" for finding in escape["warnings"])
+    assert (tmp_path / "c").read_text(encoding="utf-8").strip().endswith(
+        f"escape ../{outside.name}"
+    )
 
 
 def test_explain_classifies_command_args_and_input(tmp_path: Path) -> None:

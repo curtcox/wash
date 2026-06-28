@@ -83,8 +83,23 @@ export function availableMutations({ kind, resourceOk = false }) {
   }
   if (kind === "directory") {
     actions.push("create");
+    if (resourceOk) {
+      actions.push("delete");
+    }
   }
   return actions;
+}
+
+export function formatNamePreview(preview) {
+  if (!preview) {
+    return { className: "pending", text: "Resolution preview pending." };
+  }
+  const messages = preview.messages || [];
+  const text = messages.length ? messages.join("; ") : "Resolution preview ready.";
+  return {
+    className: preview.status || (preview.valid ? "ok" : "error"),
+    text,
+  };
 }
 
 export function appendTargets(target, kind) {
@@ -404,8 +419,49 @@ function renderNameEditor(context, names, handlers) {
 
   const preview = document.createElement("p");
   preview.className = "name-preview";
+  let currentPreview = null;
+  let previewVersion = 0;
   const updatePreview = () => {
-    preview.textContent = `Preview: ${scope.value || "."}:${name.value || "?"} → ${targetInput.value || "?"}`;
+    const version = ++previewVersion;
+    const fallback = {
+      messages: [
+        `${scope.value || "."}:${name.value || "?"} resolves to ${targetInput.value || "?"}`,
+      ],
+      status: "pending",
+      valid: false,
+    };
+    currentPreview = fallback;
+    renderNamePreview(preview, fallback);
+    if (!handlers.onNamePreview || !name.value || !targetInput.value) {
+      return;
+    }
+    handlers
+      .onNamePreview(scope.value, name.value, targetInput.value)
+      .then((next) => {
+        if (version !== previewVersion) {
+          return;
+        }
+        currentPreview = next;
+        renderNamePreview(preview, next);
+      })
+      .catch((error) => {
+        if (version !== previewVersion) {
+          return;
+        }
+        currentPreview = {
+          messages: [error.message || "Resolution preview failed"],
+          status: "error",
+          valid: false,
+        };
+        renderNamePreview(preview, currentPreview);
+      });
+  };
+  const requireValidPreview = () => {
+    if (!currentPreview || currentPreview.valid !== true) {
+      window.alert("Resolve the name target before saving.");
+      return false;
+    }
+    return true;
   };
   for (const input of [scope, name, targetInput]) {
     input.addEventListener("input", updatePreview);
@@ -421,14 +477,20 @@ function renderNameEditor(context, names, handlers) {
   const buttons = document.createElement("div");
   buttons.className = "author-toolbar";
   buttons.appendChild(
-    makeActionButton("Create name", "POST", () =>
-      handlers.onNameNew(scope.value, name.value, targetInput.value),
+    makeActionButton("Create name", "POST", () => {
+      if (requireValidPreview()) {
+        handlers.onNameNew(scope.value, name.value, targetInput.value);
+      }
+    },
       { mutates: true },
     ),
   );
   buttons.appendChild(
-    makeActionButton("Retarget name", "POST", () =>
-      handlers.onNameSet(scope.value, name.value, targetInput.value),
+    makeActionButton("Retarget name", "POST", () => {
+      if (requireValidPreview()) {
+        handlers.onNameSet(scope.value, name.value, targetInput.value);
+      }
+    },
       { mutates: true },
     ),
   );
@@ -440,6 +502,12 @@ function renderNameEditor(context, names, handlers) {
   );
   section.appendChild(buttons);
   return section;
+}
+
+function renderNamePreview(node, preview) {
+  const formatted = formatNamePreview(preview);
+  node.className = `name-preview ${formatted.className}`;
+  node.textContent = `Preview: ${formatted.text}`;
 }
 
 function renderMetaForm(editor) {

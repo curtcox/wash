@@ -541,6 +541,18 @@ dd {
   color: var(--danger);
 }
 
+.name-preview.ok {
+  color: #177245;
+}
+
+.name-preview.warning {
+  color: color-mix(in srgb, var(--danger) 70%, CanvasText);
+}
+
+.name-preview.error {
+  color: var(--danger);
+}
+
 .body-editor {
   display: grid;
   gap: 8px;

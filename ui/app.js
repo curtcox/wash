@@ -14,6 +14,7 @@ import {
   getCommands,
   getExplain,
   getHelp,
+  getNamePreview,
   getNames,
   getRootInfo,
   postAppend,
@@ -45,6 +46,7 @@ import {
   planCommandSetup,
   renderAuthorPanel,
   suggestExecRule,
+  validateMetaText,
 } from "./modules/editor.js";
 import {
   renderExplainPanel,
@@ -331,6 +333,13 @@ async function renderAuthor(target, kind, resource) {
     },
     {
       onSave: async (body, { exists, resolvedPath: resolved }) => {
+        if (commandNameFromMetaPath(target)) {
+          const validation = validateMetaText(body);
+          if (!validation.valid) {
+            window.alert(`Meta is invalid: ${validation.errors.join("; ")}`);
+            return;
+          }
+        }
         if (
           !(await confirmMutation({
             action: exists ? "Save" : "Create",
@@ -446,6 +455,10 @@ async function renderAuthor(target, kind, resource) {
         }
         await postNameRm(scope, name);
         location.reload();
+      },
+      onNamePreview: async (scope, name, nameTarget) => {
+        const payload = await getNamePreview(scope, name, nameTarget);
+        return payload.preview;
       },
       onWireEnvPath: async ({ merged, resolvedPath: resolved }) => {
         if (
