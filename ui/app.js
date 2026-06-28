@@ -12,11 +12,18 @@ import {
   fetchResource,
   fetchText,
   getCommands,
+  getExplain,
+  getHelp,
   getNames,
   getRootInfo,
   postTerm,
 } from "./modules/api.js";
 import { hideFilesBrowser, renderFilesBrowser } from "./modules/files.js";
+import {
+  renderExplainPanel,
+  renderNamesPanel,
+  renderResolvedPath,
+} from "./modules/panels.js";
 import { renderResource } from "./modules/render.js";
 import {
   buildThreadModel,
@@ -33,8 +40,10 @@ const els = {
   backing: document.querySelector("#backing-panel"),
   commands: document.querySelector("#commands-panel"),
   content: document.querySelector("#content"),
+  explain: document.querySelector("#explain-panel"),
   files: document.querySelector("#files-panel"),
   form: document.querySelector("#goto-form"),
+  help: document.querySelector("#help-panel"),
   input: document.querySelector("#goto-input"),
   kind: document.querySelector("#node-kind"),
   names: document.querySelector("#names-panel"),
@@ -42,6 +51,7 @@ const els = {
   preview: document.querySelector("#canonical-preview"),
   raw: document.querySelector("#raw-link"),
   reload: document.querySelector("#reload-button"),
+  resolved: document.querySelector("#resolved-panel"),
   root: document.querySelector("#root-panel"),
   run: document.querySelector("#run-panel"),
   shell: document.querySelector("#shell-button"),
@@ -53,6 +63,8 @@ const els = {
 };
 
 let commandCatalog = [];
+let namesPayload = { names: [], findings: [] };
+let explainAvailable = true;
 
 async function boot() {
   els.form.addEventListener("submit", (event) => {
@@ -80,12 +92,16 @@ async function loadChrome() {
     origin: location.origin,
     status: root.error || "ready",
   });
-  const [commands, names] = await Promise.all([
+  const [commands, names, help] = await Promise.all([
     getCommands().catch(() => ({ commands: [] })),
-    getNames().catch(() => ({ findings: [] })),
+    getNames().catch(() => ({ findings: [], names: [] })),
+    getHelp().catch(() => null),
   ]);
   commandCatalog = commands.commands || [];
+  namesPayload = names;
   populateAutocomplete(commands, names);
+  renderNamesPanel(els.names, names);
+  renderHelpPanel(help);
   els.commands.replaceChildren(
     ...commandCatalog.map((command) => {
       const a = document.createElement("a");
@@ -95,20 +111,26 @@ async function loadChrome() {
       return a;
     }),
   );
-  els.names.replaceChildren(
-    ...(names.names || []).map((entry) => {
-      const div = document.createElement("div");
-      div.className = `chip ${entry.inert ? "inert" : ""}`;
-      div.textContent = `${entry.scope}:${entry.name} -> ${entry.target}`;
-      return div;
-    }),
-    ...(names.findings || []).map((finding) => {
-      const div = document.createElement("div");
-      div.className = `chip ${finding.severity === "error" ? "error" : ""}`;
-      div.textContent = `${finding.location}: ${finding.message}`;
-      return div;
-    }),
-  );
+}
+
+function renderHelpPanel(help) {
+  if (!help) {
+    els.help.replaceChildren();
+    return;
+  }
+  const hint = document.createElement("p");
+  hint.className = "help-hint";
+  hint.textContent = help.hint || "Structural help is available for installed commands.";
+  const list = document.createElement("div");
+  list.className = "panel-list";
+  for (const name of help.commands || []) {
+    const link = document.createElement("a");
+    link.className = "chip";
+    link.href = framedPath(name);
+    link.textContent = name;
+    list.appendChild(link);
+  }
+  els.help.replaceChildren(hint, list);
 }
 
 function populateAutocomplete(commands, names) {
@@ -149,10 +171,13 @@ async function load() {
   hideFilesBrowser(els.files);
   els.thread.replaceChildren();
   els.thread.hidden = true;
+  renderExplainPanel(els.explain, null, { loading: true });
+  renderResolvedPath(els.resolved, {});
 
   try {
     const resource = await fetchResource(target);
     lastHeaders = resource.headers;
+    renderResolvedPath(els.resolved, resource.headers);
     const kind = detectNodeKind(target, { commands: commandCatalog, resource });
     els.kind.textContent = `Kind: ${kind}`;
     setDefinitionList(els.run, resource.headers);
@@ -162,9 +187,10 @@ async function load() {
       `${resource.status} ${resource.contentType || ""}`.trim() +
         " — reload to recompute",
     );
+    loadExplain(target);
 
     if (viewMode === "files") {
-      await renderFilesBrowser(els.files, target, api);
+      await renderFilesBrowser(els.files, target, api, { names: namesPayload.names });
       els.content.hidden = true;
       els.thread.hidden = true;
       return;
@@ -173,7 +199,10 @@ async function load() {
     const showThread = viewMode !== "content" && isThreadContext(kind);
     if (showThread) {
       const model = await buildThreadModel(target, api);
-      renderThread(els.thread, model, { activePath: target });
+      renderThread(els.thread, model, {
+        activePath: target,
+        names: namesPayload.names,
+      });
     } else {
       els.thread.hidden = true;
     }
@@ -183,6 +212,22 @@ async function load() {
   } catch (error) {
     setStatus(els.status, error.message);
     els.kind.textContent = "";
+    renderExplainPanel(els.explain, null, { error: error.message });
+  }
+}
+
+async function loadExplain(target) {
+  if (!explainAvailable || target === "/") {
+    renderExplainPanel(els.explain, null);
+    return;
+  }
+  renderExplainPanel(els.explain, null, { loading: true });
+  try {
+    const payload = await getExplain(target);
+    renderExplainPanel(els.explain, payload);
+  } catch {
+    explainAvailable = false;
+    renderExplainPanel(els.explain, null);
   }
 }
 

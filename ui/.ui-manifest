@@ -7,6 +7,7 @@ ui/modules/render.js
 ui/modules/router.js
 ui/modules/thread.js
 ui/modules/files.js
+ui/modules/panels.js
 ui/vendor/sdt_support.py
 ui/RECOVERY.md
 ui/.ui-manifest

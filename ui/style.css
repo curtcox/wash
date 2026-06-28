@@ -314,6 +314,56 @@ dd {
   opacity: 0.68;
 }
 
+.shadows-name {
+  border-style: dashed;
+}
+
+.resolved-path {
+  margin-bottom: 10px;
+}
+
+.explain-panel {
+  margin-bottom: 10px;
+}
+
+.explain-panel summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.explain-pipeline,
+.explain-segments {
+  margin-top: 8px;
+}
+
+.explain-status,
+.help-hint,
+.panel-empty {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.finding-chip.error {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+.finding-chip.warning {
+  border-color: color-mix(in srgb, var(--danger) 55%, CanvasText);
+}
+
+.name-marker {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.thread-names {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
 @media (max-width: 860px) {
   .topbar,
   .layout {

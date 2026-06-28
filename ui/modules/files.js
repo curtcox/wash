@@ -1,11 +1,12 @@
 import { framedPath } from "./router.js";
-import { directoryFor, normalizeTarget } from "./thread.js";
+import { directoryFor } from "./thread.js";
+import { shadowedNamesForDirectory } from "./panels.js";
 
 export function filesDirectoryFor(target) {
   return directoryFor(target);
 }
 
-export async function renderFilesBrowser(container, target, api) {
+export async function renderFilesBrowser(container, target, api, { names = [] } = {}) {
   const directory = filesDirectoryFor(target);
   container.hidden = false;
   const section = document.createElement("section");
@@ -41,11 +42,17 @@ export async function renderFilesBrowser(container, target, api) {
     return;
   }
 
+  const shadowed = shadowedNamesForDirectory(names, directory);
   const list = document.createElement("div");
   list.className = "files-list";
   for (const entry of listing.entries) {
     const link = document.createElement("a");
     link.className = "chip";
+    const baseName = entry.name.replace(/\/$/, "");
+    if (shadowed.has(baseName)) {
+      link.classList.add("shadows-name");
+      link.title = `Literal entry shadows the name ${baseName}.`;
+    }
     const suffix = entry.name.endsWith("/") ? entry.name : entry.name;
     const childPath =
       directory === "/"

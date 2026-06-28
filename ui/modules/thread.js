@@ -131,7 +131,7 @@ export async function buildThreadModel(target, api) {
   };
 }
 
-export function renderThread(container, model, { activePath }) {
+export function renderThread(container, model, { activePath, names = [] } = {}) {
   if (!model) {
     container.replaceChildren();
     container.hidden = true;
@@ -152,13 +152,13 @@ export function renderThread(container, model, { activePath }) {
   article.appendChild(header);
 
   for (const node of model.mainLine) {
-    article.appendChild(renderThreadNode(node, activePath));
+    article.appendChild(renderThreadNode(node, activePath, names));
   }
 
   container.replaceChildren(article);
 }
 
-function renderThreadNode(node, activePath) {
+function renderThreadNode(node, activePath, names = []) {
   const section = document.createElement("section");
   section.className = "thread-node";
   if (node.path === nodeDirectoryFor(activePath)) {
@@ -171,6 +171,23 @@ function renderThreadNode(node, activePath) {
   link.textContent = node.ordinal;
   heading.appendChild(link);
   section.appendChild(heading);
+
+  const nodeNames = namesForNode(names, node.path);
+  if (nodeNames.length > 0) {
+    const nameRow = document.createElement("div");
+    nameRow.className = "thread-names";
+    for (const entry of nodeNames) {
+      const chip = document.createElement("a");
+      chip.className = `chip name-chip${entry.inert ? " inert" : ""}`;
+      chip.href = framedPath(entry.target.startsWith("/") ? entry.target : `/${entry.target}`);
+      chip.textContent = entry.name;
+      if (entry.inert) {
+        chip.title = "Shadowed by a literal child.";
+      }
+      nameRow.appendChild(chip);
+    }
+    section.appendChild(nameRow);
+  }
 
   if (node.aPreview) {
     const pre = document.createElement("pre");
@@ -243,6 +260,14 @@ function parseProvenance(text) {
   } catch {
     return { raw: trimmed };
   }
+}
+
+function namesForNode(names, nodePath) {
+  const target = `${nodePath}/a`;
+  return (names || []).filter((entry) => {
+    const normalized = entry.target.startsWith("/") ? entry.target : `/${entry.target}`;
+    return normalized === target;
+  });
 }
 
 function summarizeText(text, limit = 240) {

@@ -84,6 +84,22 @@ export async function getNames() {
   return getJson("/names");
 }
 
+export async function getHelp() {
+  return getJson("/help");
+}
+
+export async function getExplain(target) {
+  const suffix = rawPath(target).replace(/^\//, "");
+  const path = suffix ? `/explain/${suffix}` : "/explain/";
+  const response = await fetch(path, {
+    headers: { Accept: "application/json" },
+  });
+  if (!response.ok) {
+    throw new Error(`explain returned ${response.status}`);
+  }
+  return response.json();
+}
+
 export async function postTerm(directory) {
   const trimmed = (directory || ".").replace(/^\/+/, "");
   const response = await fetch(`/term/${trimmed}`, { method: "POST" });

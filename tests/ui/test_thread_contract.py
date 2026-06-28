@@ -73,6 +73,13 @@ def test_detect_node_kind_classifies_sdt_and_commands() -> None:
     assert payload["env"] == "env-config"
 
 
+def test_thread_renders_in_tree_name_chips() -> None:
+    thread = (REPO_ROOT / "ui" / "modules" / "thread.js").read_text(encoding="utf-8")
+
+    assert "thread-names" in thread
+    assert "namesForNode" in thread
+
+
 def test_shell_directory_uses_root_for_pipeline_results() -> None:
     payload = _node_eval(
         textwrap.dedent(
