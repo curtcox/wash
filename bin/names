@@ -1,22 +1,20 @@
 #!/usr/bin/env python3
 import json
+import sys
 from pathlib import Path
 
-findings = []
-for c_file in Path.cwd().rglob("c"):
-    if not c_file.is_file():
-        continue
-    seen = set()
-    for lineno, raw in enumerate(c_file.read_text(encoding="utf-8", errors="replace").splitlines(), 1):
-        stripped = raw.strip()
-        if not stripped or stripped.startswith("#"):
-            continue
-        parts = stripped.split()
-        location = f"{c_file.relative_to(Path.cwd())}:{lineno}"
-        if len(parts) < 2:
-            findings.append({"severity": "warning", "location": location, "message": "malformed c entry"})
-            continue
-        if parts[0] in seen:
-            findings.append({"severity": "info", "location": location, "message": f"duplicate name {parts[0]!r}; last wins"})
-        seen.add(parts[0])
+bundle_root = Path(__file__).resolve().parents[1]
+sdt_path = bundle_root / "tools" / "sdt"
+if sdt_path.is_dir():
+    sys.path.insert(0, str(sdt_path))
+vendor_path = bundle_root / "ui" / "vendor"
+if vendor_path.is_dir():
+    sys.path.insert(0, str(vendor_path))
+
+try:
+    from sdt.lint import lint_tree
+except ImportError:
+    from sdt_support import lint_tree
+
+findings = [finding.__dict__ for finding in lint_tree(Path.cwd())]
 print(json.dumps({"findings": findings}, indent=2))

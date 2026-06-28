@@ -1,7 +1,111 @@
 #!/usr/bin/env python3
 import json
 import sys
+from pathlib import Path
+from urllib.parse import unquote
 
 target = sys.argv[1] if len(sys.argv) > 1 else ""
 segments = [part for part in target.split("/") if part]
-print(json.dumps({"target": target, "segments": segments, "note": "runtime explain is not standardized yet"}, indent=2))
+root = Path.cwd()
+
+
+def load_path():
+    path_file = root / "env" / "path"
+    if not path_file.is_file():
+        return []
+    dirs = []
+    for raw in path_file.read_text(encoding="utf-8").splitlines():
+        stripped = raw.strip()
+        if stripped and not stripped.startswith("#"):
+            dirs.append(root / stripped)
+    return dirs
+
+
+def resolve_command(name):
+    for directory in load_path():
+        candidate = directory / name
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+def load_meta(name):
+    meta = {
+        "arity": 0,
+        "methods": ["GET"],
+        "mime": None,
+        "mutates": False,
+        "parse-mode": "normal",
+        "stderr": "discard",
+        "exit": {},
+    }
+    meta_file = root / "env" / "meta" / name
+    if not meta_file.is_file():
+        return meta
+    for raw in meta_file.read_text(encoding="utf-8").splitlines():
+        parts = raw.split()
+        if not parts:
+            continue
+        key, values = parts[0], parts[1:]
+        if key == "arity" and values:
+            meta["arity"] = "*" if values[0] == "*" else int(values[0])
+        elif key == "methods":
+            meta["methods"] = values
+        elif key == "mime" and values:
+            meta["mime"] = values[0]
+        elif key == "mutates" and values:
+            meta["mutates"] = values[0] == "true"
+        elif key in {"parse-mode", "stderr"} and values:
+            meta[key] = values[0]
+        elif key == "exit":
+            meta["exit"] = values
+    return meta
+
+
+trace = []
+pipeline_parts = []
+idx = 0
+while idx < len(segments):
+    name = unquote(segments[idx].split("?", 1)[0])
+    command_path = resolve_command(name)
+    if command_path is None:
+        break
+    metadata = load_meta(name)
+    trace.append(
+        {
+            "raw": segments[idx],
+            "name": name,
+            "role": "command",
+            "path": str(command_path),
+            "metadata": metadata,
+        }
+    )
+    argv = []
+    arity = metadata["arity"]
+    if arity == "*":
+        arg_count = len(segments) - idx - 1
+    else:
+        arg_count = int(arity)
+    for raw_arg in segments[idx + 1 : idx + 1 + arg_count]:
+        arg = unquote(raw_arg)
+        argv.append(arg)
+        trace.append({"raw": raw_arg, "name": arg, "role": "arg"})
+    pipeline_parts.append(" ".join([name, *argv]).strip())
+    idx += 1 + arg_count
+
+input_suffix = segments[idx:]
+if input_suffix:
+    input_path = "/".join(unquote(part) for part in input_suffix)
+    trace.append({"raw": "/".join(input_suffix), "name": input_path, "role": "input"})
+    pipeline_parts.insert(0, f"cat {input_path}")
+
+print(
+    json.dumps(
+        {
+            "target": target,
+            "segments": trace,
+            "effective_pipeline": " | ".join(pipeline_parts),
+        },
+        indent=2,
+    )
+)

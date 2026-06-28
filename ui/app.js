@@ -4,6 +4,7 @@ import { renderResource } from "./modules/render.js";
 import { setDefinitionList, setStatus } from "./modules/chrome.js";
 
 const els = {
+  backing: document.querySelector("#backing-panel"),
   commands: document.querySelector("#commands-panel"),
   content: document.querySelector("#content"),
   form: document.querySelector("#goto-form"),
@@ -70,11 +71,32 @@ async function load() {
   try {
     const resource = await fetchResource(target);
     setDefinitionList(els.run, resource.headers);
+    setDefinitionList(els.backing, backingFilesFromHeaders(resource.headers));
     setStatus(els.status, `${resource.status} ${resource.contentType || ""}`.trim());
     await renderResource(els.content, resource);
   } catch (error) {
     setStatus(els.status, error.message);
   }
+}
+
+function backingFilesFromHeaders(headers) {
+  const backing = {};
+  if (headers.source) {
+    backing.source = headers.source;
+  }
+  if (headers["resolved path"]) {
+    backing["resolved path"] = headers["resolved path"];
+  }
+  if (headers.command) {
+    backing.command = headers.command;
+  }
+  if (headers.pipeline) {
+    backing.pipeline = headers.pipeline;
+  }
+  if (Object.keys(backing).length === 0) {
+    backing.status = "No backing files reported";
+  }
+  return backing;
 }
 
 boot();
