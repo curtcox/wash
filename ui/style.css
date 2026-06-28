@@ -42,6 +42,7 @@ a {
 
 .goto {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
   min-width: 0;
 }
@@ -61,6 +62,14 @@ input {
   min-width: 0;
   padding: 0 10px;
   width: 100%;
+}
+
+.preview {
+  color: var(--muted);
+  flex-basis: 100%;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  overflow-wrap: anywhere;
 }
 
 button,
@@ -144,6 +153,11 @@ button,
   padding: 16px;
 }
 
+.diagnostic h2 {
+  font-size: 16px;
+  margin: 0 0 10px;
+}
+
 dl {
   display: grid;
   gap: 6px 8px;
@@ -178,6 +192,10 @@ dd {
 .error {
   border-color: var(--danger);
   color: var(--danger);
+}
+
+.inert {
+  opacity: 0.68;
 }
 
 @media (max-width: 860px) {

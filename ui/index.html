@@ -10,8 +10,10 @@
     <header class="topbar">
       <a class="brand" href="/ui/">wash</a>
       <form id="goto-form" class="goto">
-        <input id="goto-input" name="path" autocomplete="off" spellcheck="false" aria-label="Path">
+        <input id="goto-input" name="path" list="path-options" autocomplete="off" spellcheck="false" aria-label="Path">
+        <datalist id="path-options"></datalist>
         <button type="submit">Go</button>
+        <output id="canonical-preview" class="preview" aria-live="polite"></output>
       </form>
       <nav class="actions" aria-label="View actions">
         <a id="raw-link" href="/">Raw</a>

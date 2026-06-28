@@ -1,4 +1,4 @@
-import { currentTarget, framedPath, rawPath } from "./modules/router.js";
+import { canonicalizeInput, currentTarget, displayInput, framedPath, rawPath } from "./modules/router.js";
 import { fetchResource, getCommands, getNames, getRootInfo, postTerm } from "./modules/api.js";
 import { renderResource } from "./modules/render.js";
 import { setDefinitionList, setStatus } from "./modules/chrome.js";
@@ -10,6 +10,8 @@ const els = {
   form: document.querySelector("#goto-form"),
   input: document.querySelector("#goto-input"),
   names: document.querySelector("#names-panel"),
+  options: document.querySelector("#path-options"),
+  preview: document.querySelector("#canonical-preview"),
   raw: document.querySelector("#raw-link"),
   reload: document.querySelector("#reload-button"),
   root: document.querySelector("#root-panel"),
@@ -21,8 +23,9 @@ const els = {
 async function boot() {
   els.form.addEventListener("submit", (event) => {
     event.preventDefault();
-    location.href = framedPath(els.input.value);
+    location.href = framedPath(canonicalizeInput(els.input.value));
   });
+  els.input.addEventListener("input", updatePreview);
   els.reload.addEventListener("click", () => load());
   els.shell.addEventListener("click", async () => {
     const result = await postTerm(currentTarget());
@@ -43,6 +46,7 @@ async function loadChrome() {
     getCommands().catch(() => ({ commands: [] })),
     getNames().catch(() => ({ findings: [] })),
   ]);
+  populateAutocomplete(commands, names);
   els.commands.replaceChildren(
     ...commands.commands.map((command) => {
       const a = document.createElement("a");
@@ -53,6 +57,12 @@ async function loadChrome() {
     }),
   );
   els.names.replaceChildren(
+    ...(names.names || []).map((entry) => {
+      const div = document.createElement("div");
+      div.className = `chip ${entry.inert ? "inert" : ""}`;
+      div.textContent = `${entry.scope}:${entry.name} -> ${entry.target}`;
+      return div;
+    }),
     ...(names.findings || []).map((finding) => {
       const div = document.createElement("div");
       div.className = `chip ${finding.severity === "error" ? "error" : ""}`;
@@ -62,9 +72,34 @@ async function loadChrome() {
   );
 }
 
+function populateAutocomplete(commands, names) {
+  const values = new Set();
+  for (const command of commands.commands || []) {
+    values.add(`/${command.name}`);
+  }
+  for (const finding of names.findings || []) {
+    const location = finding.location || "";
+    const name = location.includes(":") ? location.split(":").pop() : "";
+    if (name && !name.includes("/")) {
+      values.add(`/${name}`);
+    }
+  }
+  for (const entry of names.names || []) {
+    values.add(`/${entry.name}`);
+  }
+  els.options.replaceChildren(
+    ...Array.from(values).sort().map((value) => {
+      const option = document.createElement("option");
+      option.value = value;
+      return option;
+    }),
+  );
+}
+
 async function load() {
   const target = currentTarget();
-  els.input.value = target;
+  els.input.value = displayInput(target);
+  updatePreview();
   els.raw.href = rawPath(target);
   setStatus(els.status, "Loading live resource...");
   els.content.replaceChildren();
@@ -77,6 +112,11 @@ async function load() {
   } catch (error) {
     setStatus(els.status, error.message);
   }
+}
+
+function updatePreview() {
+  els.preview.value = canonicalizeInput(els.input.value);
+  els.preview.textContent = els.preview.value;
 }
 
 function backingFilesFromHeaders(headers) {

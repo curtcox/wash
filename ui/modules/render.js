@@ -1,6 +1,10 @@
 const TEXT_LIMIT = 256 * 1024;
 
 export async function renderResource(container, resource) {
+  if (!resource.ok) {
+    renderErrorDiagnostic(container, resource, await resource.blob.text());
+    return;
+  }
   const type = resource.contentType.split(";")[0].trim();
   if (type === "application/json" || resource.url.endsWith(".json")) {
     renderJson(container, await resource.blob.text());
@@ -15,6 +19,33 @@ export async function renderResource(container, resource) {
   } else {
     renderBinary(container, resource);
   }
+}
+
+function renderErrorDiagnostic(container, resource, text) {
+  const section = document.createElement("section");
+  section.className = "diagnostic error";
+  const title = document.createElement("h2");
+  title.textContent = `HTTP ${resource.status}`;
+  const pre = document.createElement("pre");
+  try {
+    const diagnostic = JSON.parse(text);
+    pre.textContent = JSON.stringify(
+      {
+        error: diagnostic.error,
+        pipeline: diagnostic.pipeline,
+        command: diagnostic.command,
+        exit_status: diagnostic.exit_status,
+        stdout: diagnostic.stdout,
+        stderr: diagnostic.stderr,
+      },
+      null,
+      2,
+    );
+  } catch {
+    pre.textContent = text;
+  }
+  section.replaceChildren(title, pre);
+  container.replaceChildren(section);
 }
 
 async function cappedText(blob) {

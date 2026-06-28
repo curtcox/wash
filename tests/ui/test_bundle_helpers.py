@@ -64,6 +64,24 @@ def test_names_reports_sdt_linter_findings(tmp_path: Path) -> None:
     assert severities["escape-target"] == "warning"
 
 
+def test_names_reports_winning_targets(tmp_path: Path) -> None:
+    _write(tmp_path, "0/a", "zero\n")
+    _write(tmp_path, "1/a", "one\n")
+    _write(tmp_path, "c", "topic /0/a\ntopic /1/a\n")
+
+    payload = _run_helper("names", tmp_path)
+
+    assert payload["names"] == [
+        {
+            "scope": ".",
+            "name": "topic",
+            "target": "/1/a",
+            "winner": True,
+            "inert": False,
+        }
+    ]
+
+
 def test_explain_classifies_command_args_and_input(tmp_path: Path) -> None:
     _write(tmp_path, "env/path", "bin\n")
     _write(tmp_path, "env/meta/grep", "arity 1\nmime text/plain\n")

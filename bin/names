@@ -17,4 +17,42 @@ except ImportError:
     from sdt_support import lint_tree
 
 findings = [finding.__dict__ for finding in lint_tree(Path.cwd())]
-print(json.dumps({"findings": findings}, indent=2))
+
+
+def rel(path):
+    try:
+        return path.resolve().relative_to(Path.cwd().resolve()).as_posix() or "."
+    except ValueError:
+        return str(path)
+
+
+def collect_names():
+    entries = []
+    for c_file in Path.cwd().rglob("c"):
+        if not c_file.is_file():
+            continue
+        scope = c_file.parent
+        table = {}
+        for raw in c_file.read_text(encoding="utf-8", errors="replace").splitlines():
+            stripped = raw.strip()
+            if not stripped or stripped.startswith("#"):
+                continue
+            parts = stripped.split()
+            if len(parts) < 2:
+                continue
+            table[parts[0]] = parts[1:]
+        for name, targets in sorted(table.items()):
+            target = targets[0]
+            entries.append(
+                {
+                    "scope": rel(scope),
+                    "name": name,
+                    "target": target,
+                    "winner": True,
+                    "inert": (scope / name).exists(),
+                }
+            )
+    return sorted(entries, key=lambda item: (item["scope"], item["name"]))
+
+
+print(json.dumps({"findings": findings, "names": collect_names()}, indent=2))
