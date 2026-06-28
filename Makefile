@@ -1,4 +1,4 @@
-.PHONY: install validate test unit lint format typecheck conformance coverage smoke-reference sdt-test ui-test \
+.PHONY: install validate test unit lint format typecheck conformance coverage smoke-reference smoke-ui sdt-test ui-test \
 	build-go lint-go test-go conformance-go test-go-all \
 	build-dart lint-dart test-dart conformance-dart test-dart-all \
 	verify-site check-book
@@ -41,6 +41,9 @@ sdt-test:
 
 ui-test:
 	$(PYTHON) -m pytest -q tests/ui
+
+smoke-ui:
+	$(PYTHON) -m pytest -q tests/ui/test_demo_smoke.py
 
 test: validate unit lint typecheck conformance sdt-test ui-test
 

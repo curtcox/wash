@@ -481,6 +481,37 @@ dd {
   flex: 1 1 160px;
 }
 
+.meta-form-grid {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  margin-bottom: 10px;
+}
+
+.meta-form-grid label {
+  color: var(--muted);
+  display: grid;
+  font-size: 12px;
+  gap: 4px;
+}
+
+.meta-form-hint,
+.command-hint {
+  color: var(--muted);
+  font-size: 13px;
+  margin: 0;
+}
+
+.command-author {
+  border-top: 1px solid var(--line);
+  margin-top: 12px;
+  padding-top: 12px;
+}
+
+.command-status {
+  margin-bottom: 10px;
+}
+
 @media (max-width: 860px) {
   .topbar,
   .layout {

@@ -1,0 +1,55 @@
+#!/bin/sh
+# demo/start — install the UI bundle (if needed) and serve the demo root.
+set -eu
+
+here=$(cd "$(dirname "$0")" && pwd)
+repo=$(cd "$here/.." && pwd)
+port="${PORT:-8080}"
+
+py=$(command -v python3 || command -v python || true)
+if [ -z "$py" ]; then
+  echo "error: python3 not found on PATH" >&2
+  exit 1
+fi
+
+"$repo/bin/wash-ui-install" "$here"
+
+export PYTHONPATH="$repo/impls/reference${PYTHONPATH:+:$PYTHONPATH}"
+
+url="http://127.0.0.1:$port/ui/"
+echo "wash: serving $here at http://127.0.0.1:$port/"
+echo "wash: framed UI at $url"
+echo "wash: press Ctrl-C to stop"
+
+"$py" -m wash.server --root "$here" --port "$port" &
+server_pid=$!
+trap 'kill "$server_pid" 2>/dev/null || true' INT TERM EXIT
+
+i=0
+while [ "$i" -lt 50 ]; do
+  if "$py" - "$port" <<'PYEOF' 2>/dev/null
+import socket, sys
+s = socket.socket()
+s.settimeout(0.2)
+try:
+    s.connect(("127.0.0.1", int(sys.argv[1])))
+    sys.exit(0)
+except OSError:
+    sys.exit(1)
+PYEOF
+  then
+    break
+  fi
+  i=$((i + 1))
+  sleep 0.1
+done
+
+if command -v open >/dev/null 2>&1; then
+  open "$url"
+elif command -v xdg-open >/dev/null 2>&1; then
+  xdg-open "$url" >/dev/null 2>&1 || true
+else
+  echo "wash: open $url in your browser"
+fi
+
+wait "$server_pid"

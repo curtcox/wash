@@ -111,6 +111,118 @@ export function isMetaPath(target) {
   return segments[0] === "env" && segments[1] === "meta";
 }
 
+export function commandNameFromScriptPath(target) {
+  const segments = (target || "/").split("/").filter(Boolean);
+  if (segments.length !== 2 || segments[0] !== "bin") {
+    return null;
+  }
+  return segments[1];
+}
+
+export function commandNameFromMetaPath(target) {
+  const segments = (target || "/").split("/").filter(Boolean);
+  if (segments.length !== 3 || segments[0] !== "env" || segments[1] !== "meta") {
+    return null;
+  }
+  return segments[2];
+}
+
+export function commandAuthorPaths(commandName) {
+  return {
+    script: `/bin/${commandName}`,
+    meta: `/env/meta/${commandName}`,
+    pathFile: "/env/path",
+    execFile: "/exec",
+  };
+}
+
+export function parseLineFile(text) {
+  return (text || "")
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line && !line.startsWith("#"));
+}
+
+export function envPathNeedsWire(text, directory = "bin") {
+  return !parseLineFile(text).includes(directory);
+}
+
+export function execNeedsRule(text, rule) {
+  const trimmed = (rule || "").trim();
+  if (!trimmed) {
+    return false;
+  }
+  return !parseLineFile(text).includes(trimmed);
+}
+
+export function appendLineFileEntry(text, line) {
+  const lines = (text || "").split("\n");
+  while (lines.length && !lines[lines.length - 1].trim()) {
+    lines.pop();
+  }
+  if (!parseLineFile(text).includes(line)) {
+    lines.push(line);
+  }
+  return `${lines.join("\n")}\n`;
+}
+
+export function suggestExecRule(commandName, scriptBody = "") {
+  const firstLine = (scriptBody || "").split("\n")[0]?.trim() || "";
+  if (firstLine.startsWith("#!")) {
+    if (firstLine.includes("python")) {
+      return "* python3";
+    }
+    if (firstLine.includes("sh") || firstLine.includes("bash")) {
+      return "* sh";
+    }
+  }
+  if ((commandName || "").endsWith(".py")) {
+    return "* python3";
+  }
+  if ((commandName || "").endsWith(".sh")) {
+    return "* sh";
+  }
+  return "* python3";
+}
+
+export function defaultCommandMeta() {
+  return "methods GET\nmime text/plain\n";
+}
+
+export function planCommandSetup({
+  commandName,
+  pathText = "",
+  execText = "",
+  metaExists = false,
+  scriptBody = "",
+}) {
+  const paths = commandAuthorPaths(commandName);
+  const execRule = suggestExecRule(commandName, scriptBody);
+  const steps = [];
+  if (!metaExists) {
+    steps.push({
+      body: defaultCommandMeta(),
+      label: "Create env/meta",
+      path: paths.meta,
+    });
+  }
+  if (envPathNeedsWire(pathText)) {
+    steps.push({
+      body: appendLineFileEntry(pathText, "bin"),
+      label: "Wire bin into env/path",
+      path: paths.pathFile,
+    });
+  }
+  if (execNeedsRule(execText, execRule)) {
+    steps.push({
+      body: appendLineFileEntry(execText, execRule),
+      label: "Add exec interpreter rule",
+      path: paths.execFile,
+    });
+  }
+  return { execRule, paths, steps };
+}
+
 export function renderAuthorPanel(container, context, handlers) {
   const {
     target,
@@ -119,6 +231,7 @@ export function renderAuthorPanel(container, context, handlers) {
     resolvedPath,
     initialText = "",
     names = [],
+    commandSetup = null,
   } = context;
   const actions = availableMutations({ kind, resourceOk });
   if (actions.length === 0) {
@@ -194,6 +307,7 @@ export function renderAuthorPanel(container, context, handlers) {
   panel.appendChild(toolbar);
 
   if (isMetaPath(target)) {
+    panel.appendChild(renderMetaForm(editor));
     const validation = validateMetaText(editor.getValue());
     panel.appendChild(renderMetaValidation(validation));
     editor.textarea.addEventListener("input", () => {
@@ -201,6 +315,10 @@ export function renderAuthorPanel(container, context, handlers) {
         renderMetaValidation(validateMetaText(editor.getValue())),
       );
     });
+  }
+
+  if (commandSetup) {
+    panel.appendChild(renderCommandAuthorSection(commandSetup, editor, handlers));
   }
 
   panel.appendChild(renderNameEditor(context, names, handlers));
@@ -322,6 +440,159 @@ function renderNameEditor(context, names, handlers) {
   );
   section.appendChild(buttons);
   return section;
+}
+
+function renderMetaForm(editor) {
+  const section = document.createElement("section");
+  section.className = "meta-form";
+  const title = document.createElement("h3");
+  title.textContent = "Meta fields";
+  section.appendChild(title);
+
+  const fields = document.createElement("div");
+  fields.className = "meta-form-grid";
+  const controls = {};
+  for (const field of META_FIELDS) {
+    const label = document.createElement("label");
+    label.textContent = field;
+    const input = document.createElement("input");
+    input.type = "text";
+    input.name = field;
+    input.spellcheck = false;
+    input.placeholder = field === "mutates" ? "true or false" : "";
+    controls[field] = input;
+    label.appendChild(input);
+    fields.appendChild(label);
+  }
+  section.appendChild(fields);
+
+  const syncFromTextarea = () => {
+    const values = parseMetaText(editor.getValue());
+    for (const field of META_FIELDS) {
+      controls[field].value = values[field] || "";
+    }
+  };
+  const syncToTextarea = () => {
+    editor.textarea.value = serializeMetaText(
+      Object.fromEntries(META_FIELDS.map((field) => [field, controls[field].value])),
+    );
+    editor.textarea.dispatchEvent(new Event("input"));
+  };
+
+  syncFromTextarea();
+  for (const input of Object.values(controls)) {
+    input.addEventListener("change", syncToTextarea);
+  }
+  editor.textarea.addEventListener("input", syncFromTextarea);
+
+  const hint = document.createElement("p");
+  hint.className = "meta-form-hint";
+  hint.textContent = "Form edits update the raw meta below; raw edits refresh the form.";
+  section.appendChild(hint);
+  return section;
+}
+
+function parseMetaText(text) {
+  const values = {};
+  for (const raw of (text || "").split("\n")) {
+    const line = raw.trim();
+    if (!line || line.startsWith("#")) {
+      continue;
+    }
+    const parts = line.split(/\s+/);
+    const field = parts[0];
+    if (META_FIELDS.includes(field)) {
+      values[field] = parts.slice(1).join(" ");
+    }
+  }
+  return values;
+}
+
+function serializeMetaText(values) {
+  const lines = [];
+  for (const field of META_FIELDS) {
+    const value = (values[field] || "").trim();
+    if (value) {
+      lines.push(`${field} ${value}`);
+    }
+  }
+  return lines.length ? `${lines.join("\n")}\n` : "";
+}
+
+function renderCommandAuthorSection(setup, editor, handlers) {
+  const section = document.createElement("section");
+  section.className = "command-author";
+  const title = document.createElement("h3");
+  title.textContent = "Command setup";
+  section.appendChild(title);
+
+  const status = document.createElement("dl");
+  status.className = "command-status";
+  appendStatusRow(status, "Script", setup.scriptExists ? "present" : "missing");
+  appendStatusRow(status, "Meta", setup.metaExists ? "present" : "missing");
+  appendStatusRow(
+    status,
+    "env/path",
+    setup.needsPathWire ? "bin not wired" : "bin wired",
+  );
+  appendStatusRow(
+    status,
+    "exec",
+    setup.needsExecRule ? `needs ${setup.execRule}` : "rule present",
+  );
+  section.appendChild(status);
+
+  const toolbar = document.createElement("div");
+  toolbar.className = "author-toolbar";
+  if (setup.needsPathWire) {
+    toolbar.appendChild(
+      makeActionButton("Wire bin", "PUT", () =>
+        handlers.onWireEnvPath({
+          merged: appendLineFileEntry(setup.pathText, "bin"),
+          resolvedPath: "/env/path",
+        }),
+      ),
+    );
+  }
+  if (setup.needsExecRule) {
+    toolbar.appendChild(
+      makeActionButton("Add exec rule", "PUT", () =>
+        handlers.onAddExecRule({
+          merged: appendLineFileEntry(setup.execText, setup.execRule),
+          resolvedPath: "/exec",
+        }),
+      ),
+    );
+  }
+  if (setup.steps.length > 0 || !setup.scriptExists) {
+    toolbar.appendChild(
+      makeActionButton("Create command", "PUT", () =>
+        handlers.onCreateCommand({
+          commandName: setup.commandName,
+          scriptBody: editor.getValue(),
+          setup,
+        }),
+        { mutates: true },
+      ),
+    );
+  }
+  section.appendChild(toolbar);
+
+  const hint = document.createElement("p");
+  hint.className = "command-hint";
+  hint.textContent =
+    "Command authoring writes the script, env/meta, env/path wiring, and exec rule. Each file can also be saved independently.";
+  section.appendChild(hint);
+  return section;
+}
+
+function appendStatusRow(node, key, value) {
+  const dt = document.createElement("dt");
+  const dd = document.createElement("dd");
+  dt.textContent = key;
+  dd.textContent = value;
+  node.appendChild(dt);
+  node.appendChild(dd);
 }
 
 function renderMetaValidation(validation) {

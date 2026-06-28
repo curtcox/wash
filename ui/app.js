@@ -32,7 +32,17 @@ import {
 } from "./modules/chrome.js";
 import { bundlePathWarning, isNonLocalOrigin, loadManifest } from "./modules/integrity.js";
 import { hideFilesBrowser, renderFilesBrowser } from "./modules/files.js";
-import { renderAuthorPanel } from "./modules/editor.js";
+import {
+  appendLineFileEntry,
+  commandNameFromMetaPath,
+  commandNameFromScriptPath,
+  defaultCommandMeta,
+  envPathNeedsWire,
+  execNeedsRule,
+  planCommandSetup,
+  renderAuthorPanel,
+  suggestExecRule,
+} from "./modules/editor.js";
 import {
   renderExplainPanel,
   renderNamesPanel,
@@ -259,6 +269,34 @@ async function renderAuthor(target, kind, resource) {
   }
   const resolvedPath =
     resource.headers?.["resolved path"] || rawPath(target);
+  const commandName =
+    commandNameFromScriptPath(target) || commandNameFromMetaPath(target);
+  let commandSetup = null;
+  if (commandName) {
+    const [pathText, execText, metaText] = await Promise.all([
+      fetchText("/env/path").catch(() => ""),
+      fetchText("/exec").catch(() => ""),
+      fetchText(`/env/meta/${commandName}`).catch(() => ""),
+    ]);
+    const execRule = suggestExecRule(commandName, initialText || metaText);
+    commandSetup = {
+      commandName,
+      execRule,
+      execText,
+      metaExists: metaText.length > 0,
+      needsExecRule: execNeedsRule(execText, execRule),
+      needsPathWire: envPathNeedsWire(pathText),
+      pathText,
+      scriptExists: resource.ok,
+      ...planCommandSetup({
+        commandName,
+        execText,
+        metaExists: metaText.length > 0,
+        pathText,
+        scriptBody: initialText,
+      }),
+    };
+  }
   renderAuthorPanel(
     els.author,
     {
@@ -268,6 +306,7 @@ async function renderAuthor(target, kind, resource) {
       resolvedPath,
       initialText,
       names: namesPayload.names,
+      commandSetup,
     },
     {
       onSave: async (body, { exists, resolvedPath: resolved }) => {
@@ -386,6 +425,66 @@ async function renderAuthor(target, kind, resource) {
         }
         await postNameRm(scope, name);
         location.reload();
+      },
+      onWireEnvPath: async ({ merged, resolvedPath: resolved }) => {
+        if (
+          !(await confirmMutation({
+            action: "Wire bin into env/path",
+            method: "PUT",
+            resolvedPath: resolved,
+          }))
+        ) {
+          return;
+        }
+        await putResource("/env/path", merged);
+        location.reload();
+      },
+      onAddExecRule: async ({ merged, resolvedPath: resolved }) => {
+        if (
+          !(await confirmMutation({
+            action: "Add exec interpreter rule",
+            method: "PUT",
+            resolvedPath: resolved,
+          }))
+        ) {
+          return;
+        }
+        await putResource("/exec", merged);
+        location.reload();
+      },
+      onCreateCommand: async ({ commandName, scriptBody, setup }) => {
+        const paths = [
+          `/bin/${commandName}`,
+          ...(setup.metaExists ? [] : [`/env/meta/${commandName}`]),
+          ...(setup.needsPathWire ? ["/env/path"] : []),
+          ...(setup.needsExecRule ? ["/exec"] : []),
+        ];
+        if (
+          !(await confirmMutation({
+            action: "Create command",
+            method: "PUT",
+            resolvedPath: paths.join("\n"),
+          }))
+        ) {
+          return;
+        }
+        await putResource(`/bin/${commandName}`, scriptBody);
+        if (!setup.metaExists) {
+          await putResource(`/env/meta/${commandName}`, defaultCommandMeta());
+        }
+        if (setup.needsPathWire) {
+          await putResource(
+            "/env/path",
+            appendLineFileEntry(setup.pathText, "bin"),
+          );
+        }
+        if (setup.needsExecRule) {
+          await putResource(
+            "/exec",
+            appendLineFileEntry(setup.execText, setup.execRule),
+          );
+        }
+        location.href = framedPath(`/bin/${commandName}`);
       },
     },
   );
