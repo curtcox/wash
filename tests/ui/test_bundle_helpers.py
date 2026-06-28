@@ -115,6 +115,43 @@ def test_append_emits_created_node_manifest_and_writes_provenance(
     assert provenance["parent"] == str(tmp_path)
 
 
+def test_search_finds_needle_in_a_files(tmp_path: Path) -> None:
+    _write(tmp_path, "0/a", "alpha beta\n")
+    _write(tmp_path, "1/a", "gamma\n")
+
+    payload = _run_helper("search", tmp_path, "beta")
+
+    assert payload["query"] == "beta"
+    assert any(match["path"] == "0/a" for match in payload["matches"])
+
+
+def test_concurrent_append_allocates_unique_ordinals(tmp_path: Path) -> None:
+    append = REPO_ROOT / "bin" / "append"
+    procs = [
+        subprocess.Popen(
+            [str(append), "."],
+            cwd=tmp_path,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        for _ in range(8)
+    ]
+    payloads = []
+    for index, proc in enumerate(procs):
+        assert proc.stdin is not None
+        proc.stdin.write(f"turn-{index}\n".encode())
+        proc.stdin.close()
+        stdout, stderr = proc.communicate(timeout=10)
+        assert proc.returncode == 0, stderr.decode("utf-8")
+        payloads.append(json.loads(stdout))
+
+    ordinals = {payload["created"] for payload in payloads}
+    assert len(ordinals) == len(procs)
+    for ordinal in ordinals:
+        assert (tmp_path / ordinal / "a").is_file()
+
+
 def test_installed_bundle_helpers_are_self_contained(tmp_path: Path) -> None:
     target = tmp_path / "root"
     target.mkdir()

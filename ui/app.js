@@ -59,7 +59,7 @@ import {
   renderThread,
   shellDirectory,
 } from "./modules/thread.js";
-import { setDefinitionList, setStatus } from "./modules/chrome.js";
+import { runPanelValues, setDefinitionList, setStatus } from "./modules/chrome.js";
 
 const api = { fetchListing, fetchText };
 
@@ -127,6 +127,7 @@ async function boot() {
 }
 
 let lastHeaders = {};
+let lastExplain = null;
 
 async function loadChrome() {
   const root = await getRootInfo().catch((error) => ({ error: error.message }));
@@ -234,7 +235,7 @@ async function load() {
     );
     const kind = detectNodeKind(target, { commands: commandCatalog, resource });
     els.kind.textContent = `Kind: ${kind}`;
-    setDefinitionList(els.run, resource.headers);
+    updateRunPanel(resource.headers, target);
     setDefinitionList(els.backing, backingFilesFromHeaders(resource.headers));
     setStatus(
       els.status,
@@ -510,18 +511,28 @@ function hideAuthorPanel() {
   els.author.replaceChildren();
 }
 
+function updateRunPanel(headers, target) {
+  setDefinitionList(els.run, runPanelValues(headers, target, lastExplain));
+}
+
 async function loadExplain(target) {
   if (!explainAvailable || target === "/") {
+    lastExplain = null;
     renderExplainPanel(els.explain, null);
+    updateRunPanel(lastHeaders, target);
     return;
   }
   renderExplainPanel(els.explain, null, { loading: true });
   try {
     const payload = await getExplain(target);
+    lastExplain = payload;
     renderExplainPanel(els.explain, payload);
+    updateRunPanel(lastHeaders, target);
   } catch {
     explainAvailable = false;
+    lastExplain = null;
     renderExplainPanel(els.explain, null);
+    updateRunPanel(lastHeaders, target);
   }
 }
 

@@ -287,6 +287,64 @@ button,
   white-space: pre-wrap;
 }
 
+.text-pretty {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.text-raw {
+  white-space: pre;
+}
+
+.view-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.view-toolbar button {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  padding: 6px 10px;
+}
+
+.view-toolbar button.active {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.json-tree-host {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 13px;
+  padding: 10px 12px;
+}
+
+.json-node {
+  margin: 2px 0 2px 12px;
+}
+
+.json-node > summary {
+  cursor: pointer;
+}
+
+.json-leaf {
+  margin: 2px 0 2px 12px;
+}
+
+.json-parse-error {
+  color: var(--danger);
+  font-size: 14px;
+  margin: 0 0 8px;
+}
+
 .content img,
 .content iframe {
   border: 1px solid var(--line);

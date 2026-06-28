@@ -1,4 +1,5 @@
 import { renderMarkdownToHtml } from "../vendor/markdown.js";
+import { renderCollapsibleJson } from "../vendor/json-view.js";
 
 const TEXT_LIMIT = 256 * 1024;
 
@@ -69,29 +70,115 @@ async function readText(blob) {
   return { text, truncated: false };
 }
 
+function renderViewToolbar({ modes, activeMode, onChange }) {
+  const bar = document.createElement("div");
+  bar.className = "view-toolbar";
+  for (const mode of modes) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.textContent = mode.label;
+    button.className = mode.id === activeMode ? "active" : "";
+    button.addEventListener("click", () => onChange(mode.id));
+    bar.appendChild(button);
+  }
+  return bar;
+}
+
 function renderText(container, text, resource, truncated) {
+  const wrap = document.createElement("div");
+  wrap.className = "text-view";
   const pre = document.createElement("pre");
   pre.textContent = text;
-  const nodes = [pre];
+  let mode = "pretty";
+
+  const applyMode = () => {
+    pre.classList.toggle("text-raw", mode === "raw");
+    pre.classList.toggle("text-pretty", mode === "pretty");
+  };
+
+  const toolbar = renderViewToolbar({
+    modes: [
+      { id: "pretty", label: "Pretty" },
+      { id: "raw", label: "Raw" },
+    ],
+    activeMode: mode,
+    onChange: (next) => {
+      mode = next;
+      applyMode();
+      for (const button of toolbar.querySelectorAll("button")) {
+        button.classList.toggle("active", button.textContent.toLowerCase() === mode);
+      }
+    },
+  });
+  applyMode();
+  wrap.replaceChildren(toolbar, pre);
   if (truncated) {
-    nodes.push(renderEscapeBar(resource));
+    wrap.appendChild(renderEscapeBar(resource));
   }
-  container.replaceChildren(...nodes);
+  container.replaceChildren(wrap);
 }
 
 function renderJson(container, text, resource, truncated) {
-  const pre = document.createElement("pre");
-  pre.className = "json-view";
+  const wrap = document.createElement("div");
+  wrap.className = "json-view-wrap";
+  let parsed = null;
+  let parseError = "";
   try {
-    pre.textContent = JSON.stringify(JSON.parse(text), null, 2);
-  } catch {
-    pre.textContent = text;
+    parsed = JSON.parse(text);
+  } catch (error) {
+    parseError = error instanceof Error ? error.message : String(error);
   }
-  const nodes = [pre];
+
+  const treeHost = document.createElement("div");
+  treeHost.className = "json-tree-host";
+  const source = document.createElement("pre");
+  source.className = "json-view";
+  source.hidden = true;
+  source.textContent = parsed !== null ? JSON.stringify(parsed, null, 2) : text;
+
+  let mode = parsed !== null ? "tree" : "source";
+  const applyMode = () => {
+    treeHost.hidden = mode !== "tree";
+    source.hidden = mode !== "source";
+    if (mode === "tree" && parsed !== null) {
+      renderCollapsibleJson(parsed, treeHost);
+    }
+  };
+
+  const modes =
+    parsed !== null
+      ? [
+          { id: "tree", label: "Tree" },
+          { id: "source", label: "Source" },
+        ]
+      : [{ id: "source", label: "Source" }];
+
+  const toolbar = renderViewToolbar({
+    modes,
+    activeMode: mode,
+    onChange: (next) => {
+      mode = next;
+      applyMode();
+      for (const button of toolbar.querySelectorAll("button")) {
+        const label = button.textContent.toLowerCase();
+        button.classList.toggle("active", label === mode);
+      }
+    },
+  });
+
+  if (parseError) {
+    const note = document.createElement("p");
+    note.className = "json-parse-error";
+    note.textContent = `Invalid JSON: ${parseError}`;
+    wrap.appendChild(note);
+  }
+
+  applyMode();
+  wrap.append(toolbar, treeHost, source);
   if (truncated) {
-    nodes.push(renderEscapeBar(resource));
+    wrap.appendChild(renderEscapeBar(resource));
   }
-  container.replaceChildren(...nodes);
+  container.replaceChildren(wrap);
 }
 
 function renderMarkdown(container, text, resource, truncated) {
@@ -131,10 +218,42 @@ function renderFrame(container, blob) {
 }
 
 function renderHtml(container, html) {
+  const wrap = document.createElement("div");
+  wrap.className = "html-view";
   const iframe = document.createElement("iframe");
-  iframe.sandbox = "allow-forms allow-popups";
-  iframe.srcdoc = html;
-  container.replaceChildren(iframe);
+  let trusted = false;
+
+  const applyMode = () => {
+    if (trusted) {
+      iframe.removeAttribute("sandbox");
+    } else {
+      iframe.sandbox = "allow-forms allow-popups";
+    }
+    iframe.srcdoc = html;
+  };
+
+  const toolbar = renderViewToolbar({
+    modes: [
+      { id: "sandbox", label: "Sandboxed" },
+      { id: "trusted", label: "Trusted" },
+    ],
+    activeMode: trusted ? "trusted" : "sandbox",
+    onChange: (next) => {
+      trusted = next === "trusted";
+      applyMode();
+      for (const button of toolbar.querySelectorAll("button")) {
+        const label = button.textContent.toLowerCase();
+        button.classList.toggle(
+          "active",
+          (trusted && label === "trusted") || (!trusted && label === "sandboxed"),
+        );
+      }
+    },
+  });
+
+  applyMode();
+  wrap.replaceChildren(toolbar, iframe);
+  container.replaceChildren(wrap);
 }
 
 function renderBinary(container, resource) {

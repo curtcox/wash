@@ -5,13 +5,38 @@ export function setStatus(node, message) {
 export function setDefinitionList(node, values) {
   const children = [];
   for (const [key, value] of Object.entries(values)) {
+    if (value === "" || value === undefined || value === null) {
+      continue;
+    }
     const dt = document.createElement("dt");
     const dd = document.createElement("dd");
     dt.textContent = key;
-    dd.textContent = String(value || "");
+    dd.textContent = String(value);
     children.push(dt, dd);
   }
   node.replaceChildren(...children);
+}
+
+export function stderrMergeNote(target, explainPayload) {
+  const segments = (target || "").split("/").filter(Boolean);
+  if (segments.includes("&")) {
+    return "Pipeline uses /& merge boundary; stderr is merged into stdout.";
+  }
+  for (const segment of explainPayload?.segments || []) {
+    if (segment.metadata?.stderr === "merge") {
+      return "Command metadata sets stderr merge; streams are merged.";
+    }
+  }
+  return "";
+}
+
+export function runPanelValues(headers = {}, target, explainPayload) {
+  const values = { ...headers };
+  const mergeNote = stderrMergeNote(target, explainPayload);
+  if (mergeNote) {
+    values["stderr merge"] = mergeNote;
+  }
+  return values;
 }
 
 export function mutatesBadge({ label = "mutates" } = {}) {
