@@ -13,12 +13,16 @@ def test_shell_contains_backing_files_panel() -> None:
 
     assert "Backing Files" in html
     assert 'id="backing-panel"' in html
+    assert 'id="backing-menu"' in html
+    assert 'id="backing-menu-panel"' in html
 
 
 def test_app_populates_backing_files_from_response_headers() -> None:
     app = (REPO_ROOT / "ui" / "app.js").read_text(encoding="utf-8")
 
     assert "backing-panel" in app
+    assert "backing-menu-panel" in app
     assert "backingFilesFromHeaders" in app
+    assert "updateBackingPanels" in app
     assert "No backing files reported" in app
     assert "resolved path" in app

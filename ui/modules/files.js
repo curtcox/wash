@@ -1,12 +1,18 @@
 import { framedPath } from "./router.js";
 import { directoryFor } from "./thread.js";
 import { shadowedNamesForDirectory } from "./panels.js";
+import { mutatesBadge } from "./chrome.js";
 
 export function filesDirectoryFor(target) {
   return directoryFor(target);
 }
 
-export async function renderFilesBrowser(container, target, api, { names = [] } = {}) {
+export async function renderFilesBrowser(
+  container,
+  target,
+  api,
+  { commands = [], names = [], rootPath = "" } = {},
+) {
   const directory = filesDirectoryFor(target);
   container.hidden = false;
   const section = document.createElement("section");
@@ -59,7 +65,12 @@ export async function renderFilesBrowser(container, target, api, { names = [] } 
         ? `/${suffix.replace(/\/$/, "")}${entry.isDir ? "/" : ""}`
         : `${directory}/${suffix.replace(/\/$/, "")}${entry.isDir ? "/" : ""}`;
     link.href = framedPath(childPath);
-    link.textContent = entry.name;
+    link.appendChild(document.createTextNode(entry.name));
+    const command = commandForFileEntry(commands, childPath, { rootPath });
+    if (command?.mutates) {
+      link.appendChild(document.createTextNode(" "));
+      link.appendChild(mutatesBadge());
+    }
     list.appendChild(link);
   }
   section.appendChild(list);
@@ -69,4 +80,24 @@ export async function renderFilesBrowser(container, target, api, { names = [] } 
 export function hideFilesBrowser(container) {
   container.hidden = true;
   container.replaceChildren();
+}
+
+export function commandForFileEntry(commands, childPath, { rootPath = "" } = {}) {
+  const normalizedChild = normalizePath(childPath);
+  const normalizedRoot = rootPath.replace(/\/+$/, "");
+  return (commands || []).find((command) => {
+    if (!command?.path) {
+      return false;
+    }
+    const commandPath = normalizePath(command.path);
+    if (normalizedRoot && commandPath.startsWith(`${normalizedRoot}/`)) {
+      return normalizePath(commandPath.slice(normalizedRoot.length)) === normalizedChild;
+    }
+    return commandPath.endsWith(normalizedChild);
+  }) || null;
+}
+
+function normalizePath(path) {
+  const normalized = `/${String(path || "").replace(/^\/+/, "")}`.replace(/\/+$/, "");
+  return normalized || "/";
 }

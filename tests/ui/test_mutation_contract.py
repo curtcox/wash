@@ -27,6 +27,8 @@ def test_chrome_exports_mutation_confirm_and_badge() -> None:
 
     assert "confirmMutation" in chrome
     assert "mutatesBadge" in chrome
+    assert "mutation-confirm" in chrome
+    assert "window.confirm" not in chrome
     assert "confirmMutation" in app
 
 
@@ -49,6 +51,18 @@ def test_app_blocks_invalid_meta_before_normal_save() -> None:
 
 def test_commands_panel_uses_mutates_badge() -> None:
     app = (REPO_ROOT / "ui" / "app.js").read_text(encoding="utf-8")
+    panels = (REPO_ROOT / "ui" / "modules" / "panels.js").read_text(encoding="utf-8")
 
     assert "mutatesBadge" in app
     assert "command.mutates" in app
+    assert "segment.metadata?.mutates" in panels
+    assert "mutatesBadge" in panels
+
+
+def test_confirm_includes_action_method_and_resolved_paths() -> None:
+    chrome = (REPO_ROOT / "ui" / "modules" / "chrome.js").read_text(encoding="utf-8")
+
+    assert "action" in chrome
+    assert "method" in chrome
+    assert "resolved path" in chrome
+    assert "mutatesBadge()" in chrome

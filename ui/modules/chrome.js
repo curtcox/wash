@@ -47,9 +47,65 @@ export function mutatesBadge({ label = "mutates" } = {}) {
 }
 
 export async function confirmMutation({ action, method, resolvedPath }) {
-  const path = resolvedPath || "unknown";
-  const message = `${action} via ${method} will touch:\n${path}\n\nContinue?`;
-  return window.confirm(message);
+  return new Promise((resolve) => {
+    const path = resolvedPath || "unknown";
+    const host = document.createElement("div");
+    host.className = "mutation-confirm";
+    host.setAttribute("role", "alertdialog");
+    host.setAttribute("aria-modal", "false");
+    host.setAttribute("aria-labelledby", "mutation-confirm-title");
+
+    const panel = document.createElement("section");
+    panel.className = "mutation-confirm-panel";
+
+    const title = document.createElement("h2");
+    title.id = "mutation-confirm-title";
+    title.appendChild(mutatesBadge());
+    title.appendChild(document.createTextNode(` ${action}`));
+
+    const dl = document.createElement("dl");
+    dl.className = "mutation-confirm-details";
+    appendDefinition(dl, "method", method || "unknown");
+    appendDefinition(dl, "resolved path", path);
+
+    const actions = document.createElement("div");
+    actions.className = "mutation-confirm-actions";
+    const cancel = document.createElement("button");
+    cancel.type = "button";
+    cancel.textContent = "Cancel";
+    const proceed = document.createElement("button");
+    proceed.type = "button";
+    proceed.className = "danger-action";
+    proceed.textContent = "Continue";
+    actions.replaceChildren(cancel, proceed);
+
+    function finish(value) {
+      host.remove();
+      resolve(value);
+    }
+
+    cancel.addEventListener("click", () => finish(false));
+    proceed.addEventListener("click", () => finish(true));
+    host.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") {
+        finish(false);
+      }
+    });
+
+    panel.replaceChildren(title, dl, actions);
+    host.appendChild(panel);
+    document.body.appendChild(host);
+    cancel.focus();
+  });
+}
+
+function appendDefinition(node, key, value) {
+  const dt = document.createElement("dt");
+  const dd = document.createElement("dd");
+  dt.textContent = key;
+  dd.textContent = String(value);
+  node.appendChild(dt);
+  node.appendChild(dd);
 }
 
 export function renderPostureBanner(node, { nonLocal = false } = {}) {

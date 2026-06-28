@@ -71,6 +71,7 @@ const els = {
   posture: document.querySelector("#posture-banner"),
   author: document.querySelector("#author-panel"),
   backing: document.querySelector("#backing-panel"),
+  backingMenu: document.querySelector("#backing-menu-panel"),
   commands: document.querySelector("#commands-panel"),
   content: document.querySelector("#content"),
   explain: document.querySelector("#explain-panel"),
@@ -100,6 +101,7 @@ let namesPayload = { names: [], findings: [] };
 let hostFeatures = { executionHeaders: false, explain: false, mutation: false };
 let explainAvailable = true;
 let bundleManifest = [];
+let rootInfo = {};
 
 async function boot() {
   els.form.addEventListener("submit", (event) => {
@@ -134,6 +136,7 @@ let lastExplain = null;
 
 async function loadChrome() {
   const root = await getRootInfo().catch((error) => ({ error: error.message }));
+  rootInfo = root;
   setDefinitionList(els.root, {
     path: root.root || "unknown",
     origin: location.origin,
@@ -228,6 +231,7 @@ async function load() {
   els.thread.hidden = true;
   renderExplainPanel(els.explain, null, { loading: true });
   renderResolvedPath(els.resolved, {});
+  updateBackingPanels({});
   renderIntegrityBanner(els.integrity, bundlePathWarning(target, bundleManifest));
 
   try {
@@ -243,7 +247,7 @@ async function load() {
     const kind = detectNodeKind(target, { commands: commandCatalog, resource });
     els.kind.textContent = `Kind: ${kind}`;
     updateRunPanel(resource.headers, target);
-    setDefinitionList(els.backing, backingFilesFromHeaders(resource.headers));
+    updateBackingPanels(resource.headers);
     setStatus(
       els.status,
       `${resource.status} ${resource.contentType || ""}`.trim() +
@@ -253,7 +257,11 @@ async function load() {
 
     if (viewMode === "files") {
       hideAuthorPanel();
-      await renderFilesBrowser(els.files, target, api, { names: namesPayload.names });
+      await renderFilesBrowser(els.files, target, api, {
+        commands: commandCatalog,
+        names: namesPayload.names,
+        rootPath: rootInfo.root || "",
+      });
       els.content.hidden = true;
       els.thread.hidden = true;
       return;
@@ -592,6 +600,12 @@ function backingFilesFromHeaders(headers) {
     backing.status = "No backing files reported";
   }
   return backing;
+}
+
+function updateBackingPanels(headers) {
+  const values = backingFilesFromHeaders(headers);
+  setDefinitionList(els.backing, values);
+  setDefinitionList(els.backingMenu, values);
 }
 
 boot();

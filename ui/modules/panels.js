@@ -1,4 +1,5 @@
 import { framedPath } from "./router.js";
+import { mutatesBadge } from "./chrome.js";
 
 export function renderResolvedPath(container, headers = {}) {
   const resolved = headers["resolved path"];
@@ -109,6 +110,10 @@ export function renderExplainPanel(container, payload, { loading = false, error 
       dt.textContent = segment.role || "segment";
       const dd = document.createElement("dd");
       dd.textContent = formatSegment(segment);
+      if (segment.metadata?.mutates) {
+        dd.appendChild(document.createTextNode(" "));
+        dd.appendChild(mutatesBadge());
+      }
       list.appendChild(dt);
       list.appendChild(dd);
     }
